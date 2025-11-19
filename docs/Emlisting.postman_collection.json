@@ -1,0 +1,326 @@
+{
+	"info": {
+		"_postman_id": "adde0979-9c88-43cb-8946-274cae02da1d",
+		"name": "Emlisting API Collection",
+		"description": "Complete API collection for EM Social Listing application",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "39872507"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:5000/health",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"health"
+					]
+				},
+				"description": "Check if the backend server is running"
+			},
+			"response": []
+		},
+		{
+			"name": "Brand Creation",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"brandName\": \"Test Brand\",\n  \"frequency\": \"30m\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:5000/api/brands/create",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"brands",
+						"create"
+					]
+				},
+				"description": "Create a new brand with monitoring frequency (5m, 30m, or 1h)"
+			},
+			"response": []
+		},
+		{
+			"name": "Get All Brands",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:5000/api/brands/getbrands",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"brands",
+						"getbrands"
+					]
+				},
+				"description": "Fetch all created brands"
+			},
+			"response": []
+		},
+		{
+			"name": "Brand Configuration",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"brandName\": \"Test Brand\",\n  \"keywords\": [\"keyword1\", \"keyword2\", \"hashtag\"],\n  \"platforms\": [\"twitter\", \"youtube\", \"reddit\"],\n  \"frequency\": \"30m\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:5000/api/brands/updateconfig",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"brands",
+						"updateconfig"
+					]
+				},
+				"description": "Configure keywords, platforms, and frequency for a brand"
+			},
+			"response": []
+		},
+		{
+			"name": "Run Brand Search (Single Keyword)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"brandName\": \"Test Brand\",\n  \"keyword\": \"keyword1\",\n  \"platforms\": [\"twitter\", \"youtube\"]\n}"
+				},
+				"url": {
+					"raw": "http://localhost:5000/api/search/run",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"search",
+						"run"
+					]
+				},
+				"description": "Run a search for specific keyword and platforms under a brand"
+			},
+			"response": []
+		},
+		{
+			"name": "Run Brand Search (All Keywords & Platforms)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"brandName\": \"Adani Tracker\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:5000/api/search/brandsearch",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"search",
+						"brandsearch"
+					]
+				},
+				"description": "Run a comprehensive search for ALL configured keywords across ALL configured platforms for a brand. This is the endpoint used by the frontend Keywords page."
+			},
+			"response": []
+		},
+		{
+			"name": "Get Posts Data",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:5000/api/search/data?brandName=Adani Tracker&limit=10&sort=desc",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"search",
+						"data"
+					],
+					"query": [
+						{
+							"key": "brandName",
+							"value": "Adani Tracker",
+							"description": "Brand name (required)"
+						},
+						{
+							"key": "limit",
+							"value": "10",
+							"description": "Number of posts to fetch"
+						},
+						{
+							"key": "sort",
+							"value": "desc",
+							"description": "Sort order (asc/desc)"
+						},
+						{
+							"key": "platform",
+							"value": "twitter",
+							"description": "Filter by platform (optional)",
+							"disabled": true
+						},
+						{
+							"key": "keyword",
+							"value": "adani",
+							"description": "Filter by keyword (optional)",
+							"disabled": true
+						}
+					]
+				},
+				"description": "Fetch posts data for a brand with optional filters"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Keywords for Brand",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:5000/api/search/keywords?brandName=Adani Tracker",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"search",
+						"keywords"
+					],
+					"query": [
+						{
+							"key": "brandName",
+							"value": "Adani Tracker"
+						}
+					]
+				},
+				"description": "Get all keywords associated with a brand"
+			},
+			"response": []
+		},
+		{
+			"name": "Recent Search",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"keyword\": \"test keyword\",\n  \"platforms\": [\"twitter\", \"youtube\"]\n}"
+				},
+				"url": {
+					"raw": "http://localhost:5000/api/search/recent",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"search",
+						"recent"
+					]
+				},
+				"description": "Run a one-time recent search (not associated with a brand)"
+			},
+			"response": []
+		},
+		{
+			"name": "Historical Search",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"keyword\": \"test keyword\",\n  \"platforms\": [\"twitter\"],\n  \"startDate\": \"2025-01-01\",\n  \"endDate\": \"2025-01-31\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:5000/api/search/historical",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"search",
+						"historical"
+					]
+				},
+				"description": "Run a historical search with date range"
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:5000",
+			"type": "string"
+		}
+	]
+}
+

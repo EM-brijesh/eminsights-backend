@@ -1,0 +1,39 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [ dev-cs ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+            set -e
+            cd /home/deploy/backend2
+
+            echo "📦 Pulling latest code..."
+            git fetch origin dev-cs
+            git reset --hard origin/dev-cs
+
+            echo "📂 Installing dependencies..."
+            npm install --production
+
+            echo "🚀 Restarting PM2 process..."
+            pm2 restart em_backend-dev || pm2 start npm --name "em_backend-dev" -- run start
+
+            pm2 save
+          EOF
