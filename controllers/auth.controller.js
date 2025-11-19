@@ -104,7 +104,7 @@ export const forgotPassword = async (req, res) => {
     user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
     await user.save();
 
-    const resetURL = `https://eminsights.in/reset-password/${resetToken}`;
+    const resetURL = `http://eminsights.in/reset-password/${resetToken}`;
 
     // Send email via nodemailer
     const transporter = nodemailer.createTransport({
@@ -186,3 +186,4 @@ export const validateResetToken = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
+
