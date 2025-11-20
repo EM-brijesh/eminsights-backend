@@ -156,11 +156,14 @@ export const resetPassword = async (req, res) => {
       });
     }
 
-    // 👇 MANUAL EXPIRY CHECK IN UTC
-    const now = new Date();
-    const expiry = new Date(user.resetPasswordExpires);
+    // 👇 COMPARE AS TIMESTAMPS
+    const nowTimestamp = Date.now();
+    const expiryTimestamp = new Date(user.resetPasswordExpires).getTime();
     
-    if (now >= expiry) {
+    console.log("⏰ Reset - Now:", nowTimestamp, new Date(nowTimestamp).toISOString());
+    console.log("⏰ Reset - Expiry:", expiryTimestamp, new Date(expiryTimestamp).toISOString());
+    
+    if (nowTimestamp >= expiryTimestamp) {
       return res.status(400).json({
         success: false,
         message: "Token has expired",
@@ -189,6 +192,7 @@ export const validateResetToken = async (req, res) => {
     }).select("email resetPasswordExpires");
 
     if (!user) {
+      console.log("❌ No user found with token");
       return res.status(400).json({
         success: false,
         message: "Invalid token",
@@ -196,15 +200,21 @@ export const validateResetToken = async (req, res) => {
       });
     }
 
-    // 👇 COMPARE IN UTC
-    const now = new Date();
-    const expiry = new Date(user.resetPasswordExpires);
+    // 👇 CONVERT EVERYTHING TO TIMESTAMPS (milliseconds since epoch)
+    const nowTimestamp = Date.now();
+    const expiryTimestamp = new Date(user.resetPasswordExpires).getTime();
     
-    console.log("⏰ Current UTC:", now.toISOString());
-    console.log("⏰ Expiry UTC:", expiry.toISOString());
-    console.log("⏰ Minutes remaining:", (expiry - now) / 60000);
+    console.log("========== VALIDATE TOKEN ==========");
+    console.log("⏰ Now (timestamp):", nowTimestamp);
+    console.log("⏰ Expiry (timestamp):", expiryTimestamp);
+    console.log("⏰ Difference (ms):", expiryTimestamp - nowTimestamp);
+    console.log("⏰ Minutes remaining:", (expiryTimestamp - nowTimestamp) / 60000);
+    console.log("⏰ Now (ISO):", new Date(nowTimestamp).toISOString());
+    console.log("⏰ Expiry (ISO):", new Date(expiryTimestamp).toISOString());
+    console.log("⏰ Is expired?:", nowTimestamp >= expiryTimestamp);
+    console.log("====================================");
 
-    if (now >= expiry) {
+    if (nowTimestamp >= expiryTimestamp) {
       return res.status(400).json({
         success: false,
         message: "Token has expired",
