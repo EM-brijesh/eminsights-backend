@@ -46,7 +46,7 @@ export async function scheduleKeywordGroup(brand, group) {
     console.log(`🚀 Running scheduled job for group: ${key}`);
 
     try {
-      await axios.post("http://localhost:5050/api/search/group/run", {
+      await axios.post(process.env.SEARCH_API_URL +"/api/search/group/run", {
         brandName: brand.brandName,
         groupName: group.groupName,
       });

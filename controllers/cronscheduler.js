@@ -19,7 +19,7 @@ export const startKeywordGroupScheduler = async () => {
       for (const brand of brands) {
         for (const group of brand.keywordGroups) {
           if (group.frequency === freq && group.status === "running") {
-            axios.post("http://api.eminsights.in/api/search/group-run", {
+            axios.post(process.env.SEARCH_API_URL +"/api/search/group-run", {
               brandName: brand.brandName,
               groupId: group._id,
             });
