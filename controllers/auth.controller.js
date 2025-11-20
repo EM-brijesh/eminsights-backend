@@ -102,8 +102,13 @@ export const forgotPassword = async (req, res) => {
     const resetToken = crypto.randomBytes(32).toString("hex");
     user.resetPasswordToken = resetToken;
     
-    // 👇 CHANGE THIS LINE
-    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
+    // 👇 CREATE DATE IN UTC EXPLICITLY
+    const expiryTime = new Date();
+    expiryTime.setUTCHours(expiryTime.getUTCHours() + 1);
+    user.resetPasswordExpires = expiryTime;
+    
+    console.log("⏰ Setting expiry to:", expiryTime.toISOString());
+    console.log("⏰ Current UTC time:", new Date().toISOString());
     
     await user.save();
 
@@ -141,15 +146,27 @@ export const resetPassword = async (req, res) => {
 
     const user = await User.findOne({
       resetPasswordToken: token,
-      resetPasswordExpires: { $gt: new Date() }, // Changed from Date.now()
     });
 
-    if (!user)
+    if (!user) {
       return res.status(400).json({
         success: false,
-        message: "Invalid or expired token",
+        message: "Invalid token",
         code: "TOKEN_INVALID",
       });
+    }
+
+    // 👇 MANUAL EXPIRY CHECK IN UTC
+    const now = new Date();
+    const expiry = new Date(user.resetPasswordExpires);
+    
+    if (now >= expiry) {
+      return res.status(400).json({
+        success: false,
+        message: "Token has expired",
+        code: "TOKEN_EXPIRED",
+      });
+    }
 
     user.password = newPassword;
     user.resetPasswordToken = undefined;
@@ -167,39 +184,37 @@ export const validateResetToken = async (req, res) => {
   try {
     const { token } = req.params;
     
-    // Find user first
-    const user = await User.findOne({ resetPasswordToken: token }).select("email resetPasswordExpires");
-    
-    console.log("🔍 Debug Info:");
-    console.log("Token:", token);
-    console.log("User found:", !!user);
-    
-    if (user) {
-      const now = new Date();
-      const expiry = new Date(user.resetPasswordExpires);
-      console.log("Current time:", now.toISOString());
-      console.log("Expiry time:", expiry.toISOString());
-      console.log("Time until expiry (minutes):", (expiry - now) / 60000);
-      console.log("Is expired?", now > expiry);
-    }
-    
-    // Now check with expiry
-    const validUser = await User.findOne({
-      resetPasswordToken: token,
-      resetPasswordExpires: { $gt: new Date() }, // Use new Date() instead of Date.now()
-    }).select("email");
+    const user = await User.findOne({ 
+      resetPasswordToken: token 
+    }).select("email resetPasswordExpires");
 
-    if (!validUser) {
+    if (!user) {
       return res.status(400).json({
         success: false,
-        message: "Invalid or expired token",
+        message: "Invalid token",
         code: "TOKEN_INVALID",
+      });
+    }
+
+    // 👇 COMPARE IN UTC
+    const now = new Date();
+    const expiry = new Date(user.resetPasswordExpires);
+    
+    console.log("⏰ Current UTC:", now.toISOString());
+    console.log("⏰ Expiry UTC:", expiry.toISOString());
+    console.log("⏰ Minutes remaining:", (expiry - now) / 60000);
+
+    if (now >= expiry) {
+      return res.status(400).json({
+        success: false,
+        message: "Token has expired",
+        code: "TOKEN_EXPIRED",
       });
     }
 
     return res.json({
       success: true,
-      emailMasked: maskEmail(validUser.email),
+      emailMasked: maskEmail(user.email),
     });
   } catch (err) {
     console.error("Validate Reset Token Error:", err);
