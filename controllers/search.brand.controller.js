@@ -4,6 +4,7 @@ import { SocialPost } from "../models/data.js";
 import { fetchYouTubeSearch } from "../services/youtube.service.js";
 import { fetchTwitterSearch } from "../services/twitter.service.js";
 import { fetchRedditSearch } from "../services/reddit.service.js";
+import { scheduleKeywordGroup } from "../utils/cronManager.js";
 
 const REALTIME_PLATFORM_FETCHERS = {
   youtube: fetchYouTubeSearch,
@@ -337,6 +338,8 @@ export const runSearch = async (req, res) => {
               groupName: group.name,
               keyword,
               platform,
+              groupId: group._id,
+              groupName: group.groupName,
               createdAt: new Date(item.createdAt || item.publishedAt || Date.now()),
               fetchedAt: new Date(),
             }));
@@ -363,4 +366,181 @@ export const runSearch = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+
+//keyword-toggler
+export const toggleKeywordGroupStatus = async (req, res) => {
+  try {
+    const { brandName, groupName, action } = req.body;
+
+    if (!brandName || !groupName || !action) {
+      return res.status(400).json({
+        success: false,
+        message: "brandName, groupName, and action are required",
+      });
+    }
+
+    const brand = await Brand.findOne({ brandName });
+    if (!brand) {
+      return res.status(404).json({ success: false, message: "Brand not found" });
+    }
+
+    const group = brand.keywordGroups.find(
+      (g) => g.groupName.toLowerCase() === groupName.toLowerCase()
+    );
+
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        message: `Keyword group "${groupName}" not found`,
+      });
+    }
+
+    if (action === "start") {
+      group.status = "running";
+      group.paused = false;
+    } else if (action === "pause") {
+      group.status = "paused";
+      group.paused = true;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid action. Use 'start' or 'pause'.",
+      });
+    }
+
+    await brand.save();
+    await scheduleKeywordGroup(brand, group); 
+
+    return res.json({
+      success: true,
+      message: `Group '${groupName}' is now ${group.status}`,
+      status: group.status,
+      paused: group.paused,
+    });
+
+  } catch (err) {
+    console.error("Toggle Group Status Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+
+//for keyword specific search
+export const runKeywordGroupSearch = async (req, res) => {
+  try {
+    const { brandName, groupName } = req.body;
+
+    if (!brandName) {
+      return res.status(400).json({ success: false, message: "brandName is required" });
+    }
+
+    if (!groupName) {
+      return res.status(400).json({ success: false, message: "groupName is required" });
+    }
+
+    // Fetch brand
+    const brand = await Brand.findOne({ brandName });
+    if (!brand) {
+      return res.status(404).json({ success: false, message: "Brand not found" });
+    }
+
+    // Get specific Keyword Group
+    const group = brand.keywordGroups.find(
+      (g) => g.groupName.toLowerCase() === groupName.toLowerCase()
+    );
+
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        message: `Keyword group "${groupName}" not found`,
+      });
+    }
+
+    // If group is paused → do not run
+    if (group.status === "paused" || group.paused === true) {
+      return res.status(400).json({
+        success: false,
+        message: `Keyword group "${groupName}" is paused`,
+      });
+    }
+
+    // Time window
+    const now = new Date();
+    const startDate = new Date(now.getTime() - 60 * 60 * 1000); // last 1 hour
+    const endDate = new Date(now.getTime() - 10 * 1000);
+
+    const summary = SUPPORTED_REALTIME_PLATFORMS.reduce(
+      (acc, platform) => ({ ...acc, [platform]: 0 }),
+      {}
+    );
+
+    const postsToInsert = [];
+
+    // Loop platforms
+    for (const platform of group.platforms) {
+      const fetcher = REALTIME_PLATFORM_FETCHERS[platform];
+      if (!fetcher) continue;
+
+      // Loop keywords
+      for (const keyword of group.keywords) {
+        let fetchedData = [];
+
+        try {
+          fetchedData = await fetcher(keyword, {
+            include: group.includeKeywords,
+            exclude: group.excludeKeywords,
+            language: group.language,
+            country: group.country,
+            startDate,
+            endDate,
+          });
+        } catch (fetchErr) {
+          console.error(`Group Fetch Error [${platform}]`, {
+            brand: brand.brandName,
+            group: group.groupName,
+            keyword,
+            error: fetchErr.message,
+          });
+          continue;
+        }
+
+        summary[platform] += fetchedData.length;
+
+        if (fetchedData.length > 0) {
+          const docs = fetchedData.map((item) => ({
+            ...item,
+            brand: brand._id,
+            brandName: brand.brandName,
+            keyword,
+            platform,
+            groupId: group._id,
+            groupName: group.groupName,
+            createdAt: new Date(item.createdAt || item.publishedAt || Date.now()),
+            fetchedAt: new Date(),
+          }));
+
+          postsToInsert.push(...docs);
+        }
+      }
+    }
+
+    if (postsToInsert.length > 0) {
+      await SocialPost.insertMany(postsToInsert, { ordered: false });
+    }
+
+    res.json({
+      success: true,
+      brandName: brand.brandName,
+      groupName: group.groupName,
+      keywordsExecuted: group.keywords.length,
+      fetched: postsToInsert.length,
+      summary,
+    });
+  } catch (err) {
+    console.error("Group Search Run Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 

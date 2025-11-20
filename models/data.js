@@ -8,12 +8,27 @@ const socialPostSchema = new mongoose.Schema(
       ref: "Brand",
       required: true,
     },
+
     keyword: { type: String, required: true },
+
     platform: {
       type: String,
       enum: ["twitter", "youtube", "reddit"],
       required: true,
     },
+
+    // ⭐ NEW FIELD ADD
+    groupId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+    },
+
+    groupName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
     createdAt: { type: Date, required: true },
 
     author: {
@@ -43,6 +58,7 @@ const socialPostSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
 
 // ✅ Indexing for performance
 socialPostSchema.index({ brand: 1 });

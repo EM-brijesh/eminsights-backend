@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const MONGODB_URI =
   process.env.MONGODB_URI ||
-  "mongodb+srv://listing-admin:em%40123@testcluster.zx6b6.mongodb.net/social-listing?retryWrites=true&w=majority";
+  "mongodb+srv://brijeshkori22:Brijesh9930@mvp.opmv2.mongodb.net/social-listing?retryWrites=true&w=majority";
 
 let cached = global.mongoose;
 

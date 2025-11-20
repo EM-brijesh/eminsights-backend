@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import { app } from "./app.js";
 import { connectToDB } from "./config/db.js";
+import { scheduleAllGroups } from "./utils/cronManager.js";
 //import { startKeywordGroupScheduler } from "./controllers/cronscheduler.js";
 
 // Load environment variables BEFORE anything else consumes them
@@ -12,6 +13,7 @@ const PORT = process.env.PORT || 5000;
 async function startServer() {
   try {
     await connectToDB();
+    await scheduleAllGroups();
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
