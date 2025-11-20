@@ -14,6 +14,6 @@ router.post("/signup", signup);
 router.post("/signin", signin);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password/:token", resetPassword);
-router.get("/reset-password/:token", validateResetToken);
+router.get("/validate-reset-token/:token", validateResetToken);
 
 export default router;
