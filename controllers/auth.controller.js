@@ -101,12 +101,14 @@ export const forgotPassword = async (req, res) => {
 
     const resetToken = crypto.randomBytes(32).toString("hex");
     user.resetPasswordToken = resetToken;
-    user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
+    
+    // 👇 CHANGE THIS LINE
+    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
+    
     await user.save();
 
-    const resetURL = `https://eminsights.in/reset-password/${resetToken}`;
+    const resetURL = `${process.env.REST_URL}/reset-password/${resetToken}`;
 
-    // Send email via nodemailer
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST || "smtp.gmail.com",
       port: Number(process.env.SMTP_PORT || 587),
@@ -139,7 +141,8 @@ export const resetPassword = async (req, res) => {
 
     const user = await User.findOne({
       resetPasswordToken: token,
-      resetPasswordExpires: { $gt: Date.now() },
+      resetPasswordExpires: { $gt: new Date() }, // Changed from Date.now()
+
     });
 
     if (!user)
@@ -164,12 +167,30 @@ export const resetPassword = async (req, res) => {
 export const validateResetToken = async (req, res) => {
   try {
     const { token } = req.params;
-    const user = await User.findOne({
+    
+    // Find user first
+    const user = await User.findOne({ resetPasswordToken: token }).select("email resetPasswordExpires");
+    
+    console.log("🔍 Debug Info:");
+    console.log("Token:", token);
+    console.log("User found:", !!user);
+    
+    if (user) {
+      const now = new Date();
+      const expiry = new Date(user.resetPasswordExpires);
+      console.log("Current time:", now.toISOString());
+      console.log("Expiry time:", expiry.toISOString());
+      console.log("Time until expiry (minutes):", (expiry - now) / 60000);
+      console.log("Is expired?", now > expiry);
+    }
+    
+    // Now check with expiry
+    const validUser = await User.findOne({
       resetPasswordToken: token,
-      resetPasswordExpires: { $gt: Date.now() },
+      resetPasswordExpires: { $gt: new Date() }, // Use new Date() instead of Date.now()
     }).select("email");
 
-    if (!user) {
+    if (!validUser) {
       return res.status(400).json({
         success: false,
         message: "Invalid or expired token",
@@ -179,7 +200,7 @@ export const validateResetToken = async (req, res) => {
 
     return res.json({
       success: true,
-      emailMasked: maskEmail(user.email),
+      emailMasked: maskEmail(validUser.email),
     });
   } catch (err) {
     console.error("Validate Reset Token Error:", err);
