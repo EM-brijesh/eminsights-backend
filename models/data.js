@@ -54,6 +54,21 @@ const socialPostSchema = new mongoose.Schema(
       engagementScore: { type: Number },
     },
 
+    // Sentiment analysis fields
+    sentiment: {
+      type: String,
+      enum: ['positive', 'neutral', 'negative'],
+      index: true
+    },
+    sentimentScore: {
+      type: Number,
+      min: 0,
+      max: 1
+    },
+    sentimentAnalyzedAt: {
+      type: Date
+    },
+
     fetchedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
@@ -66,5 +81,7 @@ socialPostSchema.index({ keyword: 1 });
 socialPostSchema.index({ platform: 1 });
 socialPostSchema.index({ createdAt: -1 });
 socialPostSchema.index({ brand: 1, keyword: 1, platform: 1, createdAt: -1 });
+socialPostSchema.index({ sentiment: 1 });
+socialPostSchema.index({ sentimentAnalyzedAt: -1 });
 
 export const SocialPost = mongoose.model("SocialPost", socialPostSchema);
