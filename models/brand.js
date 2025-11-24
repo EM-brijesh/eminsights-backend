@@ -1,7 +1,7 @@
 // models/brand.js
 import mongoose from "mongoose";
 
-const SUPPORTED_PLATFORMS = ["youtube", "twitter", "reddit", "facebook", "instagram", "quora"];
+const SUPPORTED_PLATFORMS = ["youtube", "twitter", "reddit", "facebook", "instagram", "quora" , "google"];
 const SUPPORTED_FREQUENCIES = ["5m", "10m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "24h"];
 
 const keywordGroupSchema = new mongoose.Schema(

@@ -2,7 +2,7 @@ import express from "express";
 import {
   createBrand,
   configureBrand,
-  // assignUsersToBrand,
+  assignUsersToBrand,
   getBrands,
   getBrandsByUser,
   deleteBrand,
@@ -17,7 +17,7 @@ const router = express.Router();
 
 router.post("/create", protect, isAdmin, createBrand);
 router.get("/all", protect, isAdmin, getBrands);
-//router.post("/assign-users", protect, isAdmin, assignUsersToBrand);
+router.post("/assign-users", protect, isAdmin, assignUsersToBrand);
 router.post("/delete", protect, isAdmin, deleteBrand);
 
 router.post("/configure", protect, canManageBrand, configureBrand);
