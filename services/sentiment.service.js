@@ -1,10 +1,77 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+  GoogleGenerativeAI,
+  HarmBlockThreshold,
+  HarmCategory,
+} from "@google/generative-ai";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyDXbNiWOCWt9g94XDmMyX9q-CDbKiCeWtc";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
 
 let genAI = null;
 let model = null;
+
+const SENTIMENT_LABELS = ["positive", "neutral", "negative"];
+const DEFAULT_SCORES = {
+  positive: 0.72,
+  neutral: 0.5,
+  negative: 0.28,
+};
+
+const GENERATION_CONFIG = {
+  temperature: 0.2,
+  topP: 0.8,
+  topK: 40,
+  maxOutputTokens: 256,
+  responseMimeType: "application/json",
+  responseSchema: {
+    type: "object",
+    properties: {
+      sentiment: {
+        type: "string",
+        enum: SENTIMENT_LABELS,
+        description: "Overall sentiment classification for the post.",
+      },
+      sentimentScore: {
+        type: "number",
+        minimum: 0,
+        maximum: 1,
+        description: "Confidence score scaled between 0 (negative) and 1 (positive).",
+      },
+      confidence: {
+        type: "number",
+        minimum: 0,
+        maximum: 1,
+        description: "Model confidence in the classification.",
+      },
+      explanation: {
+        type: "string",
+        description: "Optional short rationale for the classification.",
+      },
+    },
+    required: ["sentiment", "sentimentScore"],
+  },
+};
+
+const SAFETY_SETTINGS = [
+  {
+    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_SEXUAL,
+    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+  },
+];
+
+const isDev = () => process.env.NODE_ENV !== "production";
 
 // Initialize Gemini client
 const initializeGemini = () => {
@@ -22,25 +89,216 @@ const initializeGemini = () => {
  */
 const extractText = (post) => {
   // Try multiple fields to get text content
-  const text = post?.content?.text || 
-               post?.content?.description || 
-               post?.text || 
-               post?.title ||
-               post?.content?.title ||
-               "";
-  
+  const text =
+    post?.content?.text ||
+    post?.content?.description ||
+    post?.text ||
+    post?.title ||
+    post?.content?.title ||
+    post?.summary ||
+    "";
+
   // Clean up the text
   let cleanedText = text.trim();
-  
+
   // Remove excessive whitespace
-  cleanedText = cleanedText.replace(/\s+/g, ' ');
-  
+  cleanedText = cleanedText.replace(/\s+/g, " ");
+
   // For very short text, check if it's meaningful
   if (cleanedText.length < 3) {
     return "";
   }
-  
+
   return cleanedText;
+};
+
+const buildPrompt = (post = {}, text = "") => {
+  const metadata = {
+    brand: post.brandName || post.brand || "unknown",
+    platform: post.platform || "unknown",
+    keyword: post.keyword || post.content?.keyword || "unspecified",
+    language: post.language || post.locale || "unknown",
+    createdAt: post.createdAt || post.publishedAt || null,
+    author: post.author || post.user || null,
+    hasMedia: Boolean(post.media?.length || post.content?.mediaUrl),
+  };
+
+  return `You are an expert social-media sentiment analyst. Classify the overall sentiment for the following post.
+
+METADATA (JSON):
+${JSON.stringify(metadata, null, 2)}
+
+POST CONTENT:
+"""
+${text}
+"""
+
+CLASSIFICATION RULES:
+1. POSITIVE: Praise, excitement, satisfaction, support, gratitude (even if short or using emojis/slang).
+2. NEGATIVE: Complaints, frustration, anger, disappointment, sarcasm targeting the brand, or repeated issues.
+3. NEUTRAL: Factual statements, news, questions, or updates without emotional tone.
+4. Do NOT default to "neutral" when there is clear praise/complaint, even if the post is brief or uses sarcasm.
+5. Account for emojis, emphasis (!!!), negations, and informal spelling before deciding the class.
+
+Return JSON exactly matching the provided schema.`;
+};
+
+const tryParseJson = (rawText = "") => {
+  let cleanResponse = rawText.trim();
+  cleanResponse = cleanResponse
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*$/gi, "");
+
+  const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
+  const candidate = jsonMatch ? jsonMatch[0] : cleanResponse;
+
+  return JSON.parse(candidate);
+};
+
+const normalizeSentimentResult = (parsed = {}) => {
+  const sentiment = SENTIMENT_LABELS.includes(parsed.sentiment)
+    ? parsed.sentiment
+    : "neutral";
+
+  const sentimentScore =
+    typeof parsed.sentimentScore === "number"
+      ? Math.max(0, Math.min(1, parsed.sentimentScore))
+      : DEFAULT_SCORES[sentiment];
+
+  const confidence =
+    typeof parsed.confidence === "number"
+      ? Math.max(0, Math.min(1, parsed.confidence))
+      : null;
+
+  return { sentiment, sentimentScore, confidence };
+};
+
+const lexicalConfig = {
+  positiveWords: [
+    "love",
+    "awesome",
+    "amazing",
+    "great",
+    "fantastic",
+    "excellent",
+    "happy",
+    "thrilled",
+    "excited",
+    "thanks",
+    "thank you",
+    "appreciate",
+    "best",
+    "impressed",
+  ],
+  negativeWords: [
+    "hate",
+    "terrible",
+    "awful",
+    "angry",
+    "furious",
+    "frustrated",
+    "disappointed",
+    "worst",
+    "buggy",
+    "trash",
+    "broken",
+    "complain",
+    "issue",
+    "problem",
+    "unacceptable",
+    "lag",
+  ],
+  positiveEmojis: ["😍", "🤩", "😊", "😁", "🔥", "✨", "💯", "❤️", "👍"],
+  negativeEmojis: ["💀", "😡", "🤬", "😤", "💔", "👎", "😠", "😭"],
+  negations: ["not", "never", "no", "isn't", "wasn't", "aren't", "can't", "won't"],
+};
+
+const NEGATION_PATTERN = lexicalConfig.negations
+  .map((term) =>
+    term
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\s+/g, "\\s+")
+  )
+  .join("|");
+
+const countOccurrences = (text, tokens, useWordBoundary = true) => {
+  const lower = text.toLowerCase();
+  return tokens.reduce((sum, token) => {
+    if (!token) return sum;
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = useWordBoundary
+      ? new RegExp(`\\b${escaped}\\b`, "gi")
+      : new RegExp(escaped, "gi");
+    const matches = lower.match(regex);
+    return sum + (matches ? matches.length : 0);
+  }, 0);
+};
+
+const countEmojiOccurrences = (text, emojis) =>
+  emojis.reduce((sum, emoji) => sum + (text.split(emoji).length - 1), 0);
+
+const detectNegatedPhrases = (text, tokens) => {
+  if (!NEGATION_PATTERN) return 0;
+  const lower = text.toLowerCase();
+  return tokens.reduce((sum, token) => {
+    const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const phraseRegex = new RegExp(
+      `(?:${NEGATION_PATTERN})\\s+${escapedToken}`,
+      "gi"
+    );
+    const matches = lower.match(phraseRegex);
+    return sum + (matches ? matches.length : 0);
+  }, 0);
+};
+
+const evaluateLexicalHeuristics = (text = "") => {
+  if (!text || text.length < 4) return null;
+
+  const positiveHits = countOccurrences(text, lexicalConfig.positiveWords);
+  const negativeHits = countOccurrences(text, lexicalConfig.negativeWords);
+  const positiveEmojiHits = countEmojiOccurrences(text, lexicalConfig.positiveEmojis);
+  const negativeEmojiHits = countEmojiOccurrences(text, lexicalConfig.negativeEmojis);
+
+  const emphasisBonus = (text.match(/!+/g)?.length || 0) * 0.15;
+  const uppercaseWords = text
+    .split(/\s+/)
+    .filter(
+      (word) =>
+        word.length >= 4 &&
+        /[A-Z]/.test(word) &&
+        word === word.toUpperCase() &&
+        /[A-Z]/.test(word.replace(/[^A-Z]/g, ""))
+    ).length;
+
+  const negatedPositives = detectNegatedPhrases(text, lexicalConfig.positiveWords);
+  const negatedNegatives = detectNegatedPhrases(text, lexicalConfig.negativeWords);
+
+  const netPositive =
+    positiveHits + positiveEmojiHits - negatedPositives + uppercaseWords * 0.2;
+  const netNegative =
+    negativeHits + negativeEmojiHits - negatedNegatives + uppercaseWords * 0.1;
+
+  const netScore = netPositive - netNegative + emphasisBonus;
+  const magnitude = Math.abs(netScore);
+
+  if (magnitude < 1.2) {
+    return null;
+  }
+
+  const sentiment = netScore > 0 ? "positive" : "negative";
+  const confidence = Math.min(0.95, 0.55 + magnitude * 0.15);
+  const sentimentScore =
+    sentiment === "positive"
+      ? Math.min(0.95, 0.6 + magnitude * 0.1)
+      : Math.max(0.05, 0.4 - magnitude * 0.1);
+
+  return {
+    sentiment,
+    sentimentScore,
+    confidence,
+    magnitude,
+    reason: `heuristic-${sentiment}`,
+  };
 };
 
 /**
@@ -50,16 +308,16 @@ const extractText = (post) => {
  */
 export const analyzePostSentiment = async (post) => {
   const text = extractText(post);
-  
+
   // If no text, return null (no data)
   if (!text || text.length === 0) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn('No text found in post for sentiment analysis:', {
+    if (isDev()) {
+      console.warn("No text found in post for sentiment analysis:", {
         postId: post._id || post.id,
         platform: post.platform,
         hasContent: !!post.content,
         hasText: !!post.text,
-        contentKeys: post.content ? Object.keys(post.content) : []
+        contentKeys: post.content ? Object.keys(post.content) : [],
       });
     }
     return {
@@ -68,107 +326,88 @@ export const analyzePostSentiment = async (post) => {
       sentimentAnalyzedAt: null,
     };
   }
-  
+
   // Log for debugging (only in development)
-  if (process.env.NODE_ENV !== 'production' && post.platform === 'twitter') {
-    console.log('Analyzing Twitter post sentiment:', {
+  if (isDev() && post.platform === "twitter") {
+    console.log("Analyzing Twitter post sentiment:", {
       textLength: text.length,
       textPreview: text.substring(0, 100),
-      platform: post.platform
+      platform: post.platform,
     });
   }
 
   try {
     const geminiModel = initializeGemini();
-    
-    // Improved prompt optimized for social media (Twitter, YouTube, Reddit)
-    const prompt = `You are an expert sentiment analyzer for social media content. Analyze the sentiment of this social media post (which may be from Twitter/X, YouTube, Reddit, or other platforms).
 
-POST CONTENT:
-"${text}"
+    const prompt = buildPrompt(post, text);
 
-INSTRUCTIONS:
-1. Consider the context: This is social media content that may include:
-   - Emojis, hashtags, mentions (@username)
-   - Slang, abbreviations, internet language
-   - Sarcasm, irony, or humor
-   - Short-form content (tweets, comments, posts)
-
-2. Sentiment Classification:
-   - POSITIVE: Expresses satisfaction, praise, excitement, support, agreement, or positive emotions
-   - NEGATIVE: Expresses dissatisfaction, criticism, anger, disappointment, complaints, or negative emotions
-   - NEUTRAL: Factual statements, questions, informational content, or unclear sentiment
-
-3. Sentiment Score Guidelines:
-   - 0.0-0.3: Strongly negative (complaints, anger, strong criticism)
-   - 0.3-0.4: Negative (mild criticism, disappointment)
-   - 0.4-0.6: Neutral (factual, informational, unclear)
-   - 0.6-0.7: Positive (mild praise, satisfaction)
-   - 0.7-1.0: Strongly positive (enthusiasm, strong praise, excitement)
-
-4. Important: Consider the overall tone and intent, not just individual words. Account for sarcasm and context.
-
-REQUIRED OUTPUT FORMAT (JSON only, no markdown, no explanations):
-{
-  "sentiment": "positive",
-  "sentimentScore": 0.85
-}
-
-Replace "positive" with "neutral" or "negative" as appropriate, and set sentimentScore to a number between 0 and 1.`;
-
-    // Use generateContent with better configuration for consistent results
-    const generationConfig = {
-      temperature: 0.3, // Lower temperature for more consistent results
-      topP: 0.8,
-      topK: 40,
-    };
-    
-    // Generate content with improved prompt
-    const result = await geminiModel.generateContent(prompt, {
-      generationConfig,
+    const result = await geminiModel.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: GENERATION_CONFIG,
+      safetySettings: SAFETY_SETTINGS,
     });
-    
+
     const response = await result.response;
     const responseText = response.text();
-    
+
     // Log response for debugging (only in development)
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('Gemini response received:', responseText.substring(0, 200));
+    if (isDev()) {
+      console.log("Gemini response received:", responseText.substring(0, 200));
     }
-    
+
     // Try to parse JSON from response
     let parsedResponse;
+    let usedFallback = false;
     try {
-      // Clean the response text
-      let cleanResponse = responseText.trim();
-      
-      // Remove markdown code blocks if present
-      cleanResponse = cleanResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-      
-      // Extract JSON object (handles cases where there's extra text)
-      const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsedResponse = JSON.parse(jsonMatch[0]);
-      } else {
-        // Try parsing the whole response
-        parsedResponse = JSON.parse(cleanResponse);
-      }
+      parsedResponse = tryParseJson(responseText);
     } catch (parseError) {
-      console.warn("Failed to parse Gemini response as JSON, attempting text extraction:", parseError.message);
+      console.warn(
+        "Failed to parse Gemini response as JSON, attempting text extraction:",
+        parseError.message
+      );
       console.warn("Response text:", responseText.substring(0, 200));
-      
+
       // Enhanced text extraction with better pattern matching
       const lowerText = responseText.toLowerCase();
       let sentiment = "neutral";
       let sentimentScore = 0.5;
-      
+
       // More sophisticated sentiment detection
-      const positiveIndicators = ['positive', 'good', 'great', 'excellent', 'love', 'amazing', 'awesome', 'happy', 'satisfied'];
-      const negativeIndicators = ['negative', 'bad', 'terrible', 'hate', 'awful', 'disappointed', 'angry', 'frustrated', 'complaint'];
-      
-      const hasPositive = positiveIndicators.some(ind => lowerText.includes(ind));
-      const hasNegative = negativeIndicators.some(ind => lowerText.includes(ind));
-      
+      const positiveIndicators = [
+        "positive",
+        "good",
+        "great",
+        "excellent",
+        "love",
+        "amazing",
+        "awesome",
+        "happy",
+        "satisfied",
+      ];
+      const negativeIndicators = [
+        "negative",
+        "bad",
+        "terrible",
+        "hate",
+        "awful",
+        "disappointed",
+        "angry",
+        "frustrated",
+        "complaint",
+      ];
+
+      const hasPositive = positiveIndicators.some((ind) =>
+        lowerText.includes(ind)
+      );
+      const hasNegative = negativeIndicators.some((ind) =>
+        lowerText.includes(ind)
+      );
+
       if (hasPositive && !hasNegative) {
         sentiment = "positive";
         sentimentScore = 0.7;
@@ -177,8 +416,12 @@ Replace "positive" with "neutral" or "negative" as appropriate, and set sentimen
         sentimentScore = 0.3;
       } else if (hasPositive && hasNegative) {
         // Mixed sentiment - determine which is stronger
-        const positiveCount = positiveIndicators.filter(ind => lowerText.includes(ind)).length;
-        const negativeCount = negativeIndicators.filter(ind => lowerText.includes(ind)).length;
+        const positiveCount = positiveIndicators.filter((ind) =>
+          lowerText.includes(ind)
+        ).length;
+        const negativeCount = negativeIndicators.filter((ind) =>
+          lowerText.includes(ind)
+        ).length;
         if (positiveCount > negativeCount) {
           sentiment = "positive";
           sentimentScore = 0.6;
@@ -187,23 +430,48 @@ Replace "positive" with "neutral" or "negative" as appropriate, and set sentimen
           sentimentScore = 0.4;
         }
       }
-      
+
       parsedResponse = { sentiment, sentimentScore };
+      usedFallback = true;
     }
 
-    // Validate and normalize response
-    const sentiment = ["positive", "neutral", "negative"].includes(parsedResponse.sentiment)
-      ? parsedResponse.sentiment
-      : "neutral";
-    
-    const sentimentScore = typeof parsedResponse.sentimentScore === "number"
-      ? Math.max(0, Math.min(1, parsedResponse.sentimentScore))
-      : sentiment === "positive" ? 0.7 : sentiment === "negative" ? 0.3 : 0.5;
+    const normalized = normalizeSentimentResult(parsedResponse);
+    const lexicalAdjustment = evaluateLexicalHeuristics(text);
+
+    const confidenceOrScore =
+      normalized.sentimentConfidence ?? normalized.sentimentScore ?? 0.5;
+    const nearNeutralScore =
+      Math.abs((normalized.sentimentScore ?? 0.5) - 0.5) < 0.12;
+
+    const shouldApplyLexical =
+      lexicalAdjustment &&
+      (normalized.sentiment === "neutral" ||
+        confidenceOrScore < 0.45 ||
+        nearNeutralScore);
+
+    const finalSentiment = shouldApplyLexical
+      ? lexicalAdjustment.sentiment
+      : normalized.sentiment;
+    const finalScore = shouldApplyLexical
+      ? lexicalAdjustment.sentimentScore
+      : normalized.sentimentScore;
+    const finalConfidence = shouldApplyLexical
+      ? lexicalAdjustment.confidence
+      : normalized.confidence;
+
+    const fallbackReasons = [];
+    if (usedFallback) fallbackReasons.push("parse");
+    if (shouldApplyLexical) fallbackReasons.push("lexical");
 
     return {
-      sentiment,
-      sentimentScore,
+      sentiment: finalSentiment,
+      sentimentScore: finalScore,
       sentimentAnalyzedAt: new Date(),
+      sentimentConfidence: finalConfidence,
+      sentimentSource: shouldApplyLexical ? "gemini+heuristic" : "gemini",
+      sentimentFallback: fallbackReasons.length > 0,
+      sentimentFallbackReason: fallbackReasons,
+      heuristicMeta: shouldApplyLexical ? lexicalAdjustment : null,
     };
   } catch (error) {
     console.error("Gemini sentiment analysis error:", {
@@ -211,9 +479,9 @@ Replace "positive" with "neutral" or "negative" as appropriate, and set sentimen
       stack: error.stack,
       postPlatform: post?.platform,
       textLength: text?.length,
-      textPreview: text?.substring(0, 50)
+      textPreview: text?.substring(0, 50),
     });
-    
+
     // Return null on error (no data available)
     return {
       sentiment: null,
@@ -246,10 +514,18 @@ export const analyzePostsSentiment = async (posts, concurrency = 5) => {
           ...post,
           sentiment: sentimentData.sentiment,
           sentimentScore: sentimentData.sentimentScore,
+          sentimentConfidence: sentimentData.sentimentConfidence ?? null,
+          sentimentSource: sentimentData.sentimentSource || "gemini",
+          sentimentFallback: sentimentData.sentimentFallback ?? false,
           sentimentAnalyzedAt: sentimentData.sentimentAnalyzedAt,
           analysis: {
             ...(post.analysis || {}),
             sentiment: sentimentData.sentiment,
+            sentimentConfidence: sentimentData.sentimentConfidence ?? null,
+            sentimentSource: sentimentData.sentimentSource || "gemini",
+            sentimentFallback: sentimentData.sentimentFallback ?? false,
+            sentimentFallbackReason: sentimentData.sentimentFallbackReason || [],
+            heuristicMeta: sentimentData.heuristicMeta || null,
           },
         };
       })

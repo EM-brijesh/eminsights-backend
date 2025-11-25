@@ -1,12 +1,155 @@
-<<<<<<< HEAD
+import mongoose from "mongoose";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { SocialPost } from "../models/data.js";
 import { Brand } from "../models/brand.js";
 import { analyzePostsSentiment } from "../services/sentiment.service.js";
 
+const { promises: fsPromises } = fs;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const REPORT_DIR = path.resolve(__dirname, "..", "reports");
+const DIAGNOSTICS_LOG_PATH = path.join(
+  REPORT_DIR,
+  "sentiment-diagnostics.log"
+);
+const DIAGNOSTICS_SAMPLE_LIMIT = 8;
+
+const extractSnippet = (post) =>
+  (post?.content?.text ||
+    post?.content?.description ||
+    post?.text ||
+    post?.title ||
+    "")
+    .trim()
+    .slice(0, 160);
+
+const createDiagnosticsAccumulator = (limit = DIAGNOSTICS_SAMPLE_LIMIT) => ({
+  total: 0,
+  counts: {
+    positive: 0,
+    neutral: 0,
+    negative: 0,
+    pending: 0,
+  },
+  fallbackCount: 0,
+  lexicalCount: 0,
+  scoredSum: 0,
+  scoredCount: 0,
+  fallbackSamples: [],
+  lexicalSamples: [],
+  limit,
+});
+
+const normalizeSampleLimit = (value) => {
+  const parsed = Number(value);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return Math.min(50, Math.max(1, Math.floor(parsed)));
+  }
+  return DIAGNOSTICS_SAMPLE_LIMIT;
+};
+
+const accumulateDiagnostics = (accumulator, posts = []) => {
+  posts.forEach((post) => {
+    const sentiment = post.sentiment || "pending";
+    const score = typeof post.sentimentScore === "number" ? post.sentimentScore : null;
+    const source = post.sentimentSource || "unknown";
+    const snippet = extractSnippet(post);
+
+    accumulator.total += 1;
+    accumulator.counts[sentiment] = (accumulator.counts[sentiment] || 0) + 1;
+
+    if (score !== null) {
+      accumulator.scoredSum += score;
+      accumulator.scoredCount += 1;
+    }
+
+    if (post.sentimentFallback) {
+      accumulator.fallbackCount += 1;
+      if (accumulator.fallbackSamples.length < accumulator.limit) {
+        accumulator.fallbackSamples.push({
+          id: String(post._id || post.id || ""),
+          platform: post.platform,
+          sentiment,
+          score,
+          reason: post.analysis?.sentimentFallbackReason || [],
+          snippet,
+        });
+      }
+    }
+
+    if (
+      source?.includes("heuristic") &&
+      accumulator.lexicalSamples.length < accumulator.limit
+    ) {
+      accumulator.lexicalCount += 1;
+      accumulator.lexicalSamples.push({
+        id: String(post._id || post.id || ""),
+        platform: post.platform,
+        sentiment,
+        score,
+        heuristic: post.analysis?.heuristicMeta || null,
+        snippet,
+      });
+    } else if (source?.includes("heuristic")) {
+      accumulator.lexicalCount += 1;
+    }
+  });
+
+  return accumulator;
+};
+
+const finalizeDiagnostics = (accumulator) => {
+  if (!accumulator || accumulator.total === 0) {
+    return {
+      total: 0,
+      counts: accumulator?.counts || { positive: 0, neutral: 0, negative: 0, pending: 0 },
+      averageScore: null,
+      neutralRatio: 0,
+      fallbackRatio: 0,
+      lexicalRatio: 0,
+      fallbackSamples: [],
+      lexicalSamples: [],
+    };
+  }
+
+  const averageScore =
+    accumulator.scoredCount > 0
+      ? Number((accumulator.scoredSum / accumulator.scoredCount).toFixed(3))
+      : null;
+
+  const ratio = (value) =>
+    Number((value / Math.max(1, accumulator.total)).toFixed(3));
+
+  return {
+    total: accumulator.total,
+    counts: accumulator.counts,
+    averageScore,
+    neutralRatio: ratio(accumulator.counts.neutral || 0),
+    fallbackRatio: ratio(accumulator.fallbackCount),
+    lexicalRatio: ratio(accumulator.lexicalCount),
+    fallbackSamples: accumulator.fallbackSamples,
+    lexicalSamples: accumulator.lexicalSamples,
+  };
+};
+
+const persistDiagnosticsLog = async (payload) => {
+  try {
+    await fsPromises.mkdir(REPORT_DIR, { recursive: true });
+    await fsPromises.appendFile(
+      DIAGNOSTICS_LOG_PATH,
+      `${JSON.stringify(payload)}\n`,
+      "utf8"
+    );
+  } catch (error) {
+    console.error("Failed to write sentiment diagnostics log:", error.message);
+  }
+};
+
 /**
- * Check which posts already have sentiment analysis
  * POST /api/sentiment/check
- * Body: { posts: Array<Object> } - Array of post objects with _id or id
+ * Determine which posts already have stored sentiment data
  */
 export const checkSentiment = async (req, res) => {
   try {
@@ -20,13 +163,11 @@ export const checkSentiment = async (req, res) => {
       });
     }
 
-    // Extract post IDs
-    const postIds = posts
+    const rawIds = posts
       .map((post) => post._id || post.id)
-      .filter(Boolean)
-      .map((id) => String(id));
+      .filter(Boolean);
 
-    if (postIds.length === 0) {
+    if (rawIds.length === 0) {
       return res.json({
         success: true,
         postsWithSentiment: [],
@@ -34,9 +175,17 @@ export const checkSentiment = async (req, res) => {
       });
     }
 
-    // Find posts that already have sentiment
+    const objectIds = [];
+    rawIds.forEach((id) => {
+      try {
+        objectIds.push(new mongoose.Types.ObjectId(id));
+      } catch {
+        // Ignore ids that cannot be converted; they'll stay in postsToAnalyze
+      }
+    });
+
     const postsWithSentiment = await SocialPost.find({
-      _id: { $in: postIds },
+      _id: { $in: objectIds },
       sentiment: { $exists: true, $ne: null },
     }).lean();
 
@@ -44,7 +193,6 @@ export const checkSentiment = async (req, res) => {
       postsWithSentiment.map((p) => String(p._id))
     );
 
-    // Separate posts that need analysis
     const postsToAnalyze = posts.filter(
       (post) => !postsWithSentimentIds.has(String(post._id || post.id))
     );
@@ -64,13 +212,17 @@ export const checkSentiment = async (req, res) => {
 };
 
 /**
- * Analyze sentiment for posts
  * POST /api/sentiment/analyze
- * Body: { posts: Array<Object> } - Array of post objects to analyze
+ * Run sentiment analysis for the provided posts
  */
 export const analyzeSentiment = async (req, res) => {
   try {
-    const { posts } = req.body;
+    const {
+      posts,
+      includeDiagnostics = false,
+      diagnosticsTag = "manual-run",
+      diagnosticsSampleLimit,
+    } = req.body;
 
     if (!Array.isArray(posts) || posts.length === 0) {
       return res.json({
@@ -79,12 +231,28 @@ export const analyzeSentiment = async (req, res) => {
       });
     }
 
-    // Analyze sentiment for all posts
     const analyzedPosts = await analyzePostsSentiment(posts, 5);
+    let diagnostics = null;
+
+    if (includeDiagnostics) {
+      const accumulator = createDiagnosticsAccumulator(
+        normalizeSampleLimit(diagnosticsSampleLimit)
+      );
+      accumulateDiagnostics(accumulator, analyzedPosts);
+      diagnostics = finalizeDiagnostics(accumulator);
+      await persistDiagnosticsLog({
+        timestamp: new Date().toISOString(),
+        source: "analyzeSentiment",
+        tag: diagnosticsTag,
+        sampleLimit: accumulator.limit,
+        summary: diagnostics,
+      });
+    }
 
     res.json({
       success: true,
       data: analyzedPosts,
+      diagnostics,
     });
   } catch (error) {
     console.error("Analyze sentiment error:", error);
@@ -92,196 +260,12 @@ export const analyzeSentiment = async (req, res) => {
       success: false,
       message: error.message,
     });
-=======
-// controllers/sentiment.controller.js
-import { SocialPost } from "../models/data.js";
-import dotenv from "dotenv";
-
-dotenv.config();
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-// Gemini v1beta no longer exposes gemini-pro; default to a supported model.
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
-const BATCH_SIZE = 15; // Process 15 posts at a time to avoid token limits
-
-/**
- * Analyze sentiment of posts using Gemini API
- * @param {Array} posts - Array of posts with text content
- * @returns {Promise<Array>} Array of posts with sentiment analysis
- */
-export const analyzeSentiment = async (posts) => {
-  if (!GEMINI_API_KEY) {
-    console.error("GEMINI_API_KEY not found in environment variables");
-    console.error("Please add GEMINI_API_KEY to your backend .env file");
-    // Return neutral sentiment instead of throwing error
-    return posts.map((p) => ({
-      ...p,
-      sentiment: "neutral",
-      sentimentScore: 0.5,
-    }));
-  }
-
-  if (!posts || posts.length === 0) {
-    return [];
-  }
-
-  // Filter posts that have text content
-  const postsToAnalyze = posts.filter(
-    (p) => p.content?.text || p.text || p.content?.description
-  );
-
-  if (postsToAnalyze.length === 0) {
-    // Return neutral sentiment for posts without text
-    return posts.map((p) => ({
-      ...p,
-      sentiment: "neutral",
-      sentimentScore: 0.5,
-    }));
-  }
-
-  try {
-    // Process in batches to avoid token limits
-    const batches = [];
-    for (let i = 0; i < postsToAnalyze.length; i += BATCH_SIZE) {
-      batches.push(postsToAnalyze.slice(i, i + BATCH_SIZE));
-    }
-
-    const allResults = [];
-
-    for (const batch of batches) {
-      const prompt = `Analyze the sentiment of these social media posts. Return ONLY a JSON array with sentiment analysis for each post. Format: [{"index": 0, "sentiment": "positive|neutral|negative", "score": 0.0-1.0}, ...]
-
-Posts:
-${batch
-  .map(
-    (p, i) =>
-      `${i}. ${(p.content?.text || p.text || p.content?.description || "").slice(0, 200)}`
-  )
-  .join("\n")}
-
-Return ONLY the JSON array, no other text.`;
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: prompt,
-                  },
-                ],
-              },
-            ],
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error("Gemini API error:", errorData);
-        throw new Error(
-          `Gemini API error: ${response.status} - ${errorData.error?.message || response.statusText}`
-        );
-      }
-
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-      if (!text) {
-        throw new Error("No response text from Gemini API");
-      }
-
-      // Clean and parse JSON response
-      const cleanText = text.replace(/```json|```/g, "").trim();
-      let sentimentResults;
-      try {
-        sentimentResults = JSON.parse(cleanText);
-      } catch (parseError) {
-        // Try to extract JSON from markdown code blocks
-        const jsonMatch = cleanText.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          sentimentResults = JSON.parse(jsonMatch[0]);
-        } else {
-          throw parseError;
-        }
-      }
-
-      // Map results back to batch posts
-      const batchStartIndex = allResults.length;
-      const batchResults = batch.map((post, batchIndex) => {
-        const result = sentimentResults.find(
-          (r) => r.index === batchIndex
-        );
-        return {
-          post,
-          sentiment: result?.sentiment || "neutral",
-          sentimentScore: result?.score || 0.5,
-        };
-      });
-
-      allResults.push(...batchResults);
-
-      // Add small delay between batches to avoid rate limiting
-      if (batches.length > 1) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-    }
-
-    // Map results back to all posts (including those without text)
-    const resultMap = new Map();
-    let analyzedIndex = 0;
-
-    postsToAnalyze.forEach((post) => {
-      const result = allResults[analyzedIndex];
-      if (result) {
-        resultMap.set(post._id?.toString() || post.id, {
-          sentiment: result.sentiment,
-          sentimentScore: result.sentimentScore,
-        });
-        analyzedIndex++;
-      }
-    });
-
-    return posts.map((post) => {
-      const postId = post._id?.toString() || post.id;
-      const analysis = resultMap.get(postId);
-      if (analysis) {
-        return {
-          ...post,
-          sentiment: analysis.sentiment,
-          sentimentScore: analysis.sentimentScore,
-        };
-      }
-      // Post wasn't analyzed (no text), return neutral
-      return {
-        ...post,
-        sentiment: "neutral",
-        sentimentScore: 0.5,
-      };
-    });
-  } catch (error) {
-    console.error("Sentiment analysis failed:", error);
-    // Return neutral sentiment on error
-    return posts.map((p) => ({
-      ...p,
-      sentiment: "neutral",
-      sentimentScore: 0.5,
-    }));
->>>>>>> 0c707fb6555ffe0f10bfa9de4dfe43dda32fec28
   }
 };
 
 /**
- * Save sentiment analysis results to database
-<<<<<<< HEAD
  * POST /api/sentiment/save
- * Body: { posts: Array<Object> } - Array of analyzed post objects
+ * Persist analyzed sentiment outputs to MongoDB
  */
 export const saveSentiment = async (req, res) => {
   try {
@@ -296,7 +280,6 @@ export const saveSentiment = async (req, res) => {
 
     let savedCount = 0;
 
-    // Update each post with sentiment data
     for (const post of posts) {
       const postId = post._id || post.id;
       if (!postId) continue;
@@ -315,7 +298,10 @@ export const saveSentiment = async (req, res) => {
         );
         savedCount++;
       } catch (updateError) {
-        console.error(`Failed to save sentiment for post ${postId}:`, updateError.message);
+        console.error(
+          `Failed to save sentiment for post ${postId}:`,
+          updateError.message
+        );
       }
     }
 
@@ -330,70 +316,25 @@ export const saveSentiment = async (req, res) => {
       success: false,
       message: error.message,
     });
-=======
- * @param {Array} analyzedPosts - Array of posts with sentiment analysis
- * @returns {Promise<Object>} Update result
- */
-export const saveSentimentToDB = async (analyzedPosts) => {
-  if (!analyzedPosts || analyzedPosts.length === 0) {
-    return { updated: 0 };
-  }
-
-  try {
-    const updatePromises = analyzedPosts.map((post) => {
-      if (!post._id && !post.id) {
-        return null;
-      }
-
-      const updateData = {
-        sentiment: post.sentiment || "neutral",
-        sentimentScore: post.sentimentScore || 0.5,
-        sentimentAnalyzedAt: new Date(),
-      };
-
-      // Also update analysis.sentiment for backward compatibility
-      if (post.analysis) {
-        updateData["analysis.sentiment"] = post.sentiment || "neutral";
-      }
-
-      return SocialPost.findByIdAndUpdate(
-        post._id || post.id,
-        { $set: updateData },
-        { new: true }
-      );
-    });
-
-    const results = await Promise.all(
-      updatePromises.filter((p) => p !== null)
-    );
-
-    return {
-      updated: results.length,
-      success: true,
-    };
-  } catch (error) {
-    console.error("Error saving sentiment to DB:", error);
-    throw error;
->>>>>>> 0c707fb6555ffe0f10bfa9de4dfe43dda32fec28
   }
 };
 
 /**
-<<<<<<< HEAD
- * Batch analyze existing posts that don't have sentiment
  * POST /api/sentiment/batch-analyze
- * Body: { 
- *   brandName (optional): Filter by brand
- *   platform (optional): Filter by platform
- *   limit (optional): Max number of posts to analyze (default: 100)
- *   batchSize (optional): Number of posts to process at once (default: 10)
- * }
+ * Analyze batches of posts that are missing sentiment data
  */
 export const batchAnalyzeSentiment = async (req, res) => {
   try {
-    const { brandName, platform, limit = 100, batchSize = 10 } = req.body;
+    const {
+      brandName,
+      platform,
+      limit = 100,
+      batchSize = 10,
+      includeDiagnostics = false,
+      diagnosticsTag = "batch-run",
+      diagnosticsSampleLimit,
+    } = req.body;
 
-    // Build filter for posts without sentiment
     const filter = {
       $or: [
         { sentiment: { $exists: false } },
@@ -401,7 +342,6 @@ export const batchAnalyzeSentiment = async (req, res) => {
       ],
     };
 
-    // Add brand filter if provided
     if (brandName) {
       const brand = await Brand.findOne({ brandName });
       if (!brand) {
@@ -413,12 +353,10 @@ export const batchAnalyzeSentiment = async (req, res) => {
       filter.brand = brand._id;
     }
 
-    // Add platform filter if provided
     if (platform) {
       filter.platform = platform;
     }
 
-    // Find posts without sentiment
     const postsToAnalyze = await SocialPost.find(filter)
       .limit(Number(limit))
       .lean();
@@ -432,21 +370,27 @@ export const batchAnalyzeSentiment = async (req, res) => {
       });
     }
 
-    console.log(`Starting batch sentiment analysis for ${postsToAnalyze.length} posts...`);
+    console.log(
+      `Starting batch sentiment analysis for ${postsToAnalyze.length} posts...`
+    );
 
-    // Process in batches
     let analyzedCount = 0;
     let savedCount = 0;
+    const diagnosticsAccumulator = includeDiagnostics
+      ? createDiagnosticsAccumulator(normalizeSampleLimit(diagnosticsSampleLimit))
+      : null;
 
     for (let i = 0; i < postsToAnalyze.length; i += batchSize) {
       const batch = postsToAnalyze.slice(i, i + batchSize);
-      
+
       try {
-        // Analyze sentiment for batch
         const analyzedBatch = await analyzePostsSentiment(batch, 5);
         analyzedCount += analyzedBatch.length;
 
-        // Save to database
+        if (includeDiagnostics) {
+          accumulateDiagnostics(diagnosticsAccumulator, analyzedBatch);
+        }
+
         for (const post of analyzedBatch) {
           try {
             await SocialPost.updateOne(
@@ -455,30 +399,58 @@ export const batchAnalyzeSentiment = async (req, res) => {
                 $set: {
                   sentiment: post.sentiment || null,
                   sentimentScore: post.sentimentScore || null,
-                  sentimentAnalyzedAt: post.sentimentAnalyzedAt || new Date(),
+                  sentimentAnalyzedAt:
+                    post.sentimentAnalyzedAt || new Date(),
                   "analysis.sentiment": post.sentiment || null,
                 },
               }
             );
             savedCount++;
           } catch (updateError) {
-            console.error(`Failed to save sentiment for post ${post._id}:`, updateError.message);
+            console.error(
+              `Failed to save sentiment for post ${post._id}:`,
+              updateError.message
+            );
           }
         }
 
-        console.log(`Processed batch ${Math.floor(i / batchSize) + 1}: ${analyzedBatch.length} posts analyzed`);
+        console.log(
+          `Processed batch ${Math.floor(i / batchSize) + 1}: ${
+            analyzedBatch.length
+          } posts analyzed`
+        );
       } catch (batchError) {
-        console.error(`Error processing batch ${Math.floor(i / batchSize) + 1}:`, batchError.message);
-        // Continue with next batch
+        console.error(
+          `Error processing batch ${Math.floor(i / batchSize) + 1}:`,
+          batchError.message
+        );
       }
+    }
+
+    let diagnostics = null;
+    if (includeDiagnostics && diagnosticsAccumulator) {
+      diagnostics = finalizeDiagnostics(diagnosticsAccumulator);
+      await persistDiagnosticsLog({
+        timestamp: new Date().toISOString(),
+        source: "batchAnalyzeSentiment",
+        tag: diagnosticsTag,
+        brandName: brandName || null,
+        platform: platform || "all",
+        sampleLimit: diagnosticsAccumulator.limit,
+        limit,
+        batchSize,
+        summary: diagnostics,
+        totalAnalyzed: analyzedCount,
+      });
     }
 
     res.json({
       success: true,
-      message: `Batch sentiment analysis completed`,
+      message: "Batch sentiment analysis completed",
       analyzed: analyzedCount,
       saved: savedCount,
       total: postsToAnalyze.length,
+      diagnostics,
     });
   } catch (error) {
     console.error("Batch analyze sentiment error:", error);
@@ -487,37 +459,295 @@ export const batchAnalyzeSentiment = async (req, res) => {
       message: error.message,
     });
   }
-=======
- * Check which posts need sentiment analysis
- * @param {Array} posts - Array of posts to check
- * @returns {Object} Object with postsToAnalyze and postsWithSentiment
+};
+
+/**
+ * GET /api/sentiment/summary
+ * Return stored sentiment aggregates for dashboards
  */
-export const checkSentimentStatus = (posts) => {
-  const postsToAnalyze = [];
-  const postsWithSentiment = [];
+export const getSentimentSummary = async (req, res) => {
+  try {
+    const { brandName, platform, keyword, startDate, endDate } = req.query || {};
 
-  posts.forEach((post) => {
-    const hasText = post.content?.text || post.text || post.content?.description;
-    const hasSentiment = post.sentiment && post.sentimentAnalyzedAt;
-
-    if (hasText && !hasSentiment) {
-      postsToAnalyze.push(post);
-    } else if (hasSentiment) {
-      postsWithSentiment.push(post);
-    } else {
-      // No text, assign neutral
-      postsWithSentiment.push({
-        ...post,
-        sentiment: "neutral",
-        sentimentScore: 0.5,
+    if (!brandName) {
+      return res.status(400).json({
+        success: false,
+        message: "brandName query parameter is required",
       });
     }
-  });
 
-  return {
-    postsToAnalyze,
-    postsWithSentiment,
-  };
->>>>>>> 0c707fb6555ffe0f10bfa9de4dfe43dda32fec28
+    const brand = await Brand.findOne({ brandName });
+    if (!brand) {
+      return res.status(404).json({
+        success: false,
+        message: "Brand not found",
+      });
+    }
+
+    const normalizeDate = (value) => {
+      if (!value) return null;
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    const matchStage = { brand: brand._id };
+    const normalizedPlatform =
+      typeof platform === "string" && platform !== "all"
+        ? platform.toLowerCase()
+        : null;
+    if (normalizedPlatform) {
+      matchStage.platform = normalizedPlatform;
+    }
+
+    const normalizedKeyword =
+      typeof keyword === "string" && keyword !== "all"
+        ? keyword.trim()
+        : null;
+    if (normalizedKeyword) {
+      matchStage.keyword = normalizedKeyword;
+    }
+
+    const start = normalizeDate(startDate);
+    const end = normalizeDate(endDate);
+    if (start || end) {
+      matchStage.createdAt = {};
+      if (start) matchStage.createdAt.$gte = start;
+      if (end) matchStage.createdAt.$lte = end;
+    }
+
+    const analyzedCondition = {
+      $cond: [
+        {
+          $and: [{ $ifNull: ["$sentiment", false] }, { $ne: ["$sentiment", null] }],
+        },
+        1,
+        0,
+      ],
+    };
+
+    const sentimentScoreExpr = {
+      $cond: [
+        { $and: [{ $ifNull: ["$sentimentScore", false] }, { $ne: ["$sentimentScore", null] }] },
+        "$sentimentScore",
+        null,
+      ],
+    };
+
+    const pipeline = [
+      { $match: matchStage },
+      {
+        $facet: {
+          totals: [
+            {
+              $group: {
+                _id: null,
+                totalPosts: { $sum: 1 },
+                analyzedPosts: { $sum: analyzedCondition },
+                avgSentimentScore: { $avg: sentimentScoreExpr },
+                latestAnalyzedAt: { $max: "$sentimentAnalyzedAt" },
+                earliestPostAt: { $min: "$createdAt" },
+                latestPostAt: { $max: "$createdAt" },
+              },
+            },
+          ],
+          sentimentBreakdown: [
+            {
+              $group: {
+                _id: {
+                  $cond: [
+                    {
+                      $and: [
+                        { $ifNull: ["$sentiment", false] },
+                        { $ne: ["$sentiment", null] },
+                      ],
+                    },
+                    "$sentiment",
+                    "pending",
+                  ],
+                },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          platformBreakdown: [
+            {
+              $group: {
+                _id: "$platform",
+                total: { $sum: 1 },
+                positive: { $sum: { $cond: [{ $eq: ["$sentiment", "positive"] }, 1, 0] } },
+                neutral: { $sum: { $cond: [{ $eq: ["$sentiment", "neutral"] }, 1, 0] } },
+                negative: { $sum: { $cond: [{ $eq: ["$sentiment", "negative"] }, 1, 0] } },
+                analyzed: { $sum: analyzedCondition },
+                avgScore: { $avg: sentimentScoreExpr },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                platform: { $ifNull: ["$_id", "unknown"] },
+                total: 1,
+                pending: { $max: [{ $subtract: ["$total", "$analyzed"] }, 0] },
+                positive: 1,
+                neutral: 1,
+                negative: 1,
+                analyzed: 1,
+                avgScore: 1,
+              },
+            },
+            { $sort: { total: -1 } },
+          ],
+          keywordBreakdown: [
+            {
+              $group: {
+                _id: "$keyword",
+                total: { $sum: 1 },
+                positive: { $sum: { $cond: [{ $eq: ["$sentiment", "positive"] }, 1, 0] } },
+                neutral: { $sum: { $cond: [{ $eq: ["$sentiment", "neutral"] }, 1, 0] } },
+                negative: { $sum: { $cond: [{ $eq: ["$sentiment", "negative"] }, 1, 0] } },
+                analyzed: { $sum: analyzedCondition },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                keyword: { $ifNull: ["$_id", "unknown"] },
+                total: 1,
+                pending: { $max: [{ $subtract: ["$total", "$analyzed"] }, 0] },
+                positive: 1,
+                neutral: 1,
+                negative: 1,
+              },
+            },
+            { $sort: { total: -1 } },
+            { $limit: 25 },
+          ],
+          timeline: [
+            {
+              $group: {
+                _id: {
+                  $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+                },
+                positive: { $sum: { $cond: [{ $eq: ["$sentiment", "positive"] }, 1, 0] } },
+                neutral: { $sum: { $cond: [{ $eq: ["$sentiment", "neutral"] }, 1, 0] } },
+                negative: { $sum: { $cond: [{ $eq: ["$sentiment", "negative"] }, 1, 0] } },
+                total: { $sum: 1 },
+                pending: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $ifNull: ["$sentiment", false] },
+                          { $ne: ["$sentiment", null] },
+                        ],
+                      },
+                      0,
+                      1,
+                    ],
+                  },
+                },
+                avgScore: { $avg: sentimentScoreExpr },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                date: "$_id",
+                positive: 1,
+                neutral: 1,
+                negative: 1,
+                total: 1,
+                pending: 1,
+                avgScore: 1,
+              },
+            },
+            { $sort: { date: 1 } },
+            { $limit: 90 },
+          ],
+        },
+      },
+    ];
+
+    const [result] = await SocialPost.aggregate(pipeline);
+    const totalsDoc = result?.totals?.[0] || {};
+
+    const sentiment = { positive: 0, neutral: 0, negative: 0, pending: 0 };
+    (result?.sentimentBreakdown || []).forEach((entry) => {
+      const key = ["positive", "neutral", "negative"].includes(entry?._id)
+        ? entry._id
+        : entry?._id === "pending"
+        ? "pending"
+        : "neutral";
+      sentiment[key] = entry?.count || 0;
+    });
+
+    const platforms = (result?.platformBreakdown || []).map((entry) => ({
+      platform: entry.platform || "unknown",
+      total: entry.total || 0,
+      positive: entry.positive || 0,
+      neutral: entry.neutral || 0,
+      negative: entry.negative || 0,
+      analyzed: entry.analyzed || 0,
+      pending: entry.pending || Math.max((entry.total || 0) - (entry.analyzed || 0), 0),
+      avgScore:
+        typeof entry.avgScore === "number" ? entry.avgScore : null,
+    }));
+
+    const keywords = (result?.keywordBreakdown || []).map((entry) => ({
+      keyword: entry.keyword || "unknown",
+      total: entry.total || 0,
+      positive: entry.positive || 0,
+      neutral: entry.neutral || 0,
+      negative: entry.negative || 0,
+      pending: entry.pending || Math.max((entry.total || 0) - (entry.analyzed || 0), 0),
+    }));
+
+    const timeline = (result?.timeline || []).map((entry) => ({
+      date: entry.date,
+      positive: entry.positive || 0,
+      neutral: entry.neutral || 0,
+      negative: entry.negative || 0,
+      total: entry.total || 0,
+      pending: entry.pending || 0,
+      avgScore:
+        typeof entry.avgScore === "number" ? entry.avgScore : null,
+    }));
+
+    const totalPosts = totalsDoc.totalPosts || 0;
+    const analyzedPosts = totalsDoc.analyzedPosts || 0;
+
+    res.json({
+      success: true,
+      brand: brandName,
+      filters: {
+        brandName,
+        platform: platform || "all",
+        keyword: keyword || "all",
+        startDate: startDate || null,
+        endDate: endDate || null,
+      },
+      totals: {
+        totalPosts,
+        analyzedPosts,
+        pendingPosts: Math.max(totalPosts - analyzedPosts, 0),
+        avgSentimentScore:
+          typeof totalsDoc.avgSentimentScore === "number"
+            ? totalsDoc.avgSentimentScore
+            : null,
+        latestAnalyzedAt: totalsDoc.latestAnalyzedAt || null,
+        earliestPostAt: totalsDoc.earliestPostAt || null,
+        latestPostAt: totalsDoc.latestPostAt || null,
+      },
+      sentiment,
+      platforms,
+      keywords,
+      timeline,
+    });
+  } catch (error) {
+    console.error("Get sentiment summary error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to build sentiment summary",
+    });
+  }
 };
 

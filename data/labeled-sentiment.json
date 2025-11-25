@@ -1,0 +1,57 @@
+[
+  {
+    "id": "sample-1",
+    "platform": "twitter",
+    "brand": "SampleBrand",
+    "language": "en",
+    "text": "Absolutely love the new dashboard update – the insights are 🔥🔥🔥!",
+    "expectedSentiment": "positive",
+    "notes": "Strong positive tone with emojis"
+  },
+  {
+    "id": "sample-2",
+    "platform": "reddit",
+    "brand": "SampleBrand",
+    "language": "en",
+    "text": "I'm not mad, just disappointed. Another outage during peak hours? Seriously unacceptable.",
+    "expectedSentiment": "negative",
+    "notes": "Clear frustration and complaint"
+  },
+  {
+    "id": "sample-3",
+    "platform": "youtube",
+    "brand": "SampleBrand",
+    "language": "en",
+    "text": "Release timeline for the Android update?",
+    "expectedSentiment": "neutral",
+    "notes": "Genuine question, no sentiment words"
+  },
+  {
+    "id": "sample-4",
+    "platform": "twitter",
+    "brand": "SampleBrand",
+    "language": "en",
+    "text": "This \"upgrade\" broke scheduling again. Can't trust these releases anymore.",
+    "expectedSentiment": "negative",
+    "notes": "Sarcastic quotes plus frustration"
+  },
+  {
+    "id": "sample-5",
+    "platform": "reddit",
+    "brand": "SampleBrand",
+    "language": "en",
+    "text": "Not gonna lie, the latest patch is actually pretty great 👏",
+    "expectedSentiment": "positive",
+    "notes": "Starts with negation but overall positive"
+  },
+  {
+    "id": "sample-6",
+    "platform": "youtube",
+    "brand": "SampleBrand",
+    "language": "en",
+    "text": "Tutorial video covering the new dashboard features.",
+    "expectedSentiment": "neutral",
+    "notes": "Informational description"
+  }
+]
+
