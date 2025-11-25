@@ -5,11 +5,13 @@ import { fetchYouTubeSearch } from "../services/youtube.service.js";
 import { fetchTwitterSearch } from "../services/twitter.service.js";
 import { fetchRedditSearch } from "../services/reddit.service.js";
 import { scheduleKeywordGroup } from "../utils/cronManager.js";
+import { fetchGoogleSearch } from "../services/google.service.js";
 
 const REALTIME_PLATFORM_FETCHERS = {
   youtube: fetchYouTubeSearch,
   twitter: fetchTwitterSearch,
   reddit: fetchRedditSearch,
+  google: fetchGoogleSearch,
 };
 
 const SUPPORTED_REALTIME_PLATFORMS = Object.keys(REALTIME_PLATFORM_FETCHERS);

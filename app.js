@@ -7,6 +7,7 @@ import brandRoutes from "./routes/brand.route.js";
 import authRoutes from "./routes/auth.route.js";
 import dataRoutes from "./routes/data.routes.js";
 import usersRoutes from "./routes/users.route.js";
+import sentimentRoutes from "./routes/sentiment.route.js";
 import { protect } from "./middleware/auth.js";
 
 const app = express();
@@ -56,6 +57,7 @@ app.use("/api/brands", brandRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/data", protect, dataRoutes);
+app.use("/api/sentiment", protect, sentimentRoutes);
 
 // Health check route
 app.get("/health", (req, res) => {

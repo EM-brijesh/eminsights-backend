@@ -34,44 +34,44 @@ export const createBrand = async (req, res) => {
 /* ---------------------------------------------------
    ASSIGN USERS TO BRAND (Brand admin users)
 --------------------------------------------------- */
-// export const assignUsersToBrand = async (req, res) => {
-//   try {
-//     const { brandName, users = [] } = req.body;
+export const assignUsersToBrand = async (req, res) => {
+  try {
+    const { brandName, users = [] } = req.body;
 
-//     if (!brandName)
-//       return res.status(400).json({ success: false, message: "brandName is required" });
+    if (!brandName)
+      return res.status(400).json({ success: false, message: "brandName is required" });
 
-//     if (!Array.isArray(users))
-//       return res.status(400).json({ success: false, message: "users must be an array" });
+    if (!Array.isArray(users))
+      return res.status(400).json({ success: false, message: "users must be an array" });
 
-//     const brand = await Brand.findOne({
-//       brandName: new RegExp(`^${brandName}$`, "i"),
-//     });
+    const brand = await Brand.findOne({
+      brandName: new RegExp(`^${brandName}$`, "i"),
+    });
 
-//     if (!brand)
-//       return res.status(404).json({ success: false, message: "Brand not found" });
+    if (!brand)
+      return res.status(404).json({ success: false, message: "Brand not found" });
 
-//     const normalizedEmails = users.map(u => u.toLowerCase().trim()).filter(Boolean);
+    const normalizedEmails = users.map(u => u.toLowerCase().trim()).filter(Boolean);
 
-//     // brand.assignedUsers = Array.from(new Set([
-//     //   ...brand.assignedUsers,
-//     //   ...normalizedEmails
-//     // ]));
-//     //asign user -fix 
-//     brand.assignedUsers = normalizedEmails;  // <-- overwrite array
+    // brand.assignedUsers = Array.from(new Set([
+    //   ...brand.assignedUsers,
+    //   ...normalizedEmails
+    // ]));
+    //asign user -fix 
+    brand.assignedUsers = normalizedEmails;  // <-- overwrite array
 
-//     await brand.save();
+    await brand.save();
 
-//     res.json({
-//       success: true,
-//       message: "Users assigned to brand",
-//       assignedUsers: brand.assignedUsers,
-//     });
-//   } catch (err) {
-//     console.error("Assign Users Error:", err);
-//     res.status(500).json({ success: false, message: err.message });
-//   }
-// };
+    res.json({
+      success: true,
+      message: "Users assigned to brand",
+      assignedUsers: brand.assignedUsers,
+    });
+  } catch (err) {
+    console.error("Assign Users Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 /* ---------------------------------------------------
    UPDATE BRAND (Brand metadata only)

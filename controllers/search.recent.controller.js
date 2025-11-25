@@ -1,6 +1,9 @@
 import { fetchYouTubeSearch } from "../services/youtube.service.js";
 import { fetchTwitterSearch } from "../services/twitter.service.js";
 import { fetchRedditSearch } from "../services/reddit.service.js";
+import { fetchGoogleSearch } from "../services/google.service.js";
+
+
 
 export const searchRecent = async (req, res) => {
   try {
@@ -60,6 +63,17 @@ export const searchRecent = async (req, res) => {
           startDate: searchStart,
           endDate: searchEnd
         }).then((data) => (results.reddit = data))
+      );
+    }
+    if (platforms.includes("google")) {
+      promises.push(
+        fetchGoogleSearch(keyword, {
+          includeKeywords: include,
+          excludeKeywords: exclude
+        }).then((data) => {
+          console.log("🟢 Google final mapped results:", data);   // <-- ADD HERE
+          results.google = data;
+        })
       );
     }
 

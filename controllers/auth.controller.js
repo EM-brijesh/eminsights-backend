@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { User } from "../models/user.js";
 import nodemailer from "nodemailer";
+import { Brand } from "../models/brand.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecretkey";
 const JWT_EXPIRES_IN = "7d";
@@ -231,4 +232,59 @@ export const validateResetToken = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
+
+//get list of users and the brands assigned to them
+export const getUsers = async (req, res) => {
+  try {
+    // Get all users
+    const users = await User.find({}, "name email role").lean();
+
+    // Get all brands
+    const brands = await Brand.find({}, "brandName assignedUsers").lean();
+
+    // Attach brands to each user based on matching email
+    const usersWithBrands = users.map(user => {
+      const userBrands = brands.filter(brand =>
+        Array.isArray(brand.assignedUsers) &&
+        brand.assignedUsers.includes(user.email.toLowerCase())
+      );
+
+      return {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        brands: userBrands
+      };
+    });
+
+    res.json(usersWithBrands);
+
+  } catch (err) {
+    console.error("Get All Users Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+
+
+
+//get list of brands and there users
+export const getAdmins = async (req , res) => {
+  try {
+    const admins = await User.find({ role: 'admin' }).exec();
+    res.json(admins.map((user) => {
+      return {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      }
+    }));
+  }catch (err) {
+    console.error("Get Admins Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+}
+
 
