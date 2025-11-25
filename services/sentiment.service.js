@@ -4,13 +4,21 @@ import {
   HarmCategory,
 } from "@google/generative-ai";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyDXbNiWOCWt9g94XDmMyX9q-CDbKiCeWtc";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+// ============================================================================
+// CONFIGURATION & CONSTANTS
+// ============================================================================
 
-let genAI = null;
-let model = null;
+const CONFIG = {
+  apiKey: process.env.GEMINI_API_KEY,
+  model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+  defaultConcurrency: 5,
+  maxRetries: 3,
+  retryDelayMs: 1000,
+  requestTimeoutMs: 30000,
+};
 
 const SENTIMENT_LABELS = ["positive", "neutral", "negative"];
+
 const DEFAULT_SCORES = {
   positive: 0.72,
   neutral: 0.5,
@@ -62,7 +70,7 @@ const SAFETY_SETTINGS = [
     threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
   },
   {
-    category: HarmCategory.HARM_CATEGORY_SEXUAL,
+    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
     threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
   },
   {
@@ -71,23 +79,143 @@ const SAFETY_SETTINGS = [
   },
 ];
 
-const isDev = () => process.env.NODE_ENV !== "production";
+// ============================================================================
+// ERROR CLASSES
+// ============================================================================
 
-// Initialize Gemini client
-const initializeGemini = () => {
-  if (!genAI) {
-    genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+class SentimentAnalysisError extends Error {
+  constructor(message, code, details = {}) {
+    super(message);
+    this.name = "SentimentAnalysisError";
+    this.code = code;
+    this.details = details;
   }
-  return model;
+}
+
+class ConfigurationError extends SentimentAnalysisError {
+  constructor(message, details) {
+    super(message, "CONFIGURATION_ERROR", details);
+    this.name = "ConfigurationError";
+  }
+}
+
+class APIError extends SentimentAnalysisError {
+  constructor(message, details) {
+    super(message, "API_ERROR", details);
+    this.name = "APIError";
+  }
+}
+
+class ValidationError extends SentimentAnalysisError {
+  constructor(message, details) {
+    super(message, "VALIDATION_ERROR", details);
+    this.name = "ValidationError";
+  }
+}
+
+// ============================================================================
+// LOGGING UTILITY
+// ============================================================================
+
+const Logger = {
+  level: process.env.LOG_LEVEL || "info",
+  levels: { debug: 0, info: 1, warn: 2, error: 3 },
+
+  shouldLog(level) {
+    return this.levels[level] >= this.levels[this.level];
+  },
+
+  debug(message, meta = {}) {
+    if (this.shouldLog("debug")) {
+      console.log(JSON.stringify({ level: "debug", message, ...meta, timestamp: new Date().toISOString() }));
+    }
+  },
+
+  info(message, meta = {}) {
+    if (this.shouldLog("info")) {
+      console.log(JSON.stringify({ level: "info", message, ...meta, timestamp: new Date().toISOString() }));
+    }
+  },
+
+  warn(message, meta = {}) {
+    if (this.shouldLog("warn")) {
+      console.warn(JSON.stringify({ level: "warn", message, ...meta, timestamp: new Date().toISOString() }));
+    }
+  },
+
+  error(message, error = null, meta = {}) {
+    if (this.shouldLog("error")) {
+      console.error(JSON.stringify({
+        level: "error",
+        message,
+        error: error ? {
+          message: error.message,
+          stack: error.stack,
+          code: error.code,
+        } : null,
+        ...meta,
+        timestamp: new Date().toISOString(),
+      }));
+    }
+  },
 };
 
+// ============================================================================
+// GEMINI CLIENT MANAGER
+// ============================================================================
+
+class GeminiClientManager {
+  constructor() {
+    this.client = null;
+    this.model = null;
+  }
+
+  initialize() {
+    if (!CONFIG.apiKey) {
+      throw new ConfigurationError(
+        "GEMINI_API_KEY environment variable is required",
+        { available: false }
+      );
+    }
+
+    if (!this.client) {
+      this.client = new GoogleGenerativeAI(CONFIG.apiKey);
+      this.model = this.client.getGenerativeModel({ model: CONFIG.model });
+      Logger.info("Gemini client initialized", { model: CONFIG.model });
+    }
+
+    return this.model;
+  }
+
+  getModel() {
+    if (!this.model) {
+      return this.initialize();
+    }
+    return this.model;
+  }
+
+  reset() {
+    this.client = null;
+    this.model = null;
+  }
+}
+
+const geminiManager = new GeminiClientManager();
+
+// ============================================================================
+// TEXT EXTRACTION
+// ============================================================================
+
 /**
- * Extract text content from a post
- * @param {Object} post - Post object with content field
- * @returns {string} - Extracted text content
+ * Extract and clean text content from a post object
+ * @param {Object} post - Post object with various content fields
+ * @returns {string} - Cleaned text content
  */
-const extractText = (post) => {
+function extractText(post) {
+  if (!post || typeof post !== "object") {
+    return "";
+  }
+
   // Try multiple fields to get text content
   const text =
     post?.content?.text ||
@@ -99,7 +227,7 @@ const extractText = (post) => {
     "";
 
   // Clean up the text
-  let cleanedText = text.trim();
+  let cleanedText = String(text).trim();
 
   // Remove excessive whitespace
   cleanedText = cleanedText.replace(/\s+/g, " ");
@@ -110,9 +238,19 @@ const extractText = (post) => {
   }
 
   return cleanedText;
-};
+}
 
-const buildPrompt = (post = {}, text = "") => {
+// ============================================================================
+// PROMPT BUILDING
+// ============================================================================
+
+/**
+ * Build the prompt for sentiment analysis
+ * @param {Object} post - Post object
+ * @param {string} text - Extracted text content
+ * @returns {string} - Formatted prompt
+ */
+function buildPrompt(post = {}, text = "") {
   const metadata = {
     brand: post.brandName || post.brand || "unknown",
     platform: post.platform || "unknown",
@@ -141,21 +279,50 @@ CLASSIFICATION RULES:
 5. Account for emojis, emphasis (!!!), negations, and informal spelling before deciding the class.
 
 Return JSON exactly matching the provided schema.`;
-};
+}
 
-const tryParseJson = (rawText = "") => {
+// ============================================================================
+// JSON PARSING
+// ============================================================================
+
+/**
+ * Parse JSON response from Gemini, handling various formats
+ * @param {string} rawText - Raw response text
+ * @returns {Object} - Parsed JSON object
+ */
+function parseJsonResponse(rawText = "") {
   let cleanResponse = rawText.trim();
+  
+  // Remove markdown code blocks
   cleanResponse = cleanResponse
     .replace(/```json\s*/gi, "")
     .replace(/```\s*$/gi, "");
 
+  // Try to extract JSON object
   const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
   const candidate = jsonMatch ? jsonMatch[0] : cleanResponse;
 
-  return JSON.parse(candidate);
-};
+  try {
+    return JSON.parse(candidate);
+  } catch (error) {
+    throw new ValidationError("Failed to parse JSON response", {
+      rawText: rawText.substring(0, 200),
+      cleanedText: candidate.substring(0, 200),
+      error: error.message,
+    });
+  }
+}
 
-const normalizeSentimentResult = (parsed = {}) => {
+// ============================================================================
+// RESULT NORMALIZATION
+// ============================================================================
+
+/**
+ * Normalize and validate sentiment analysis result
+ * @param {Object} parsed - Parsed response object
+ * @returns {Object} - Normalized result with sentiment, sentimentScore, confidence
+ */
+function normalizeSentimentResult(parsed = {}) {
   const sentiment = SENTIMENT_LABELS.includes(parsed.sentiment)
     ? parsed.sentiment
     : "neutral";
@@ -171,368 +338,347 @@ const normalizeSentimentResult = (parsed = {}) => {
       : null;
 
   return { sentiment, sentimentScore, confidence };
-};
+}
 
-const lexicalConfig = {
-  positiveWords: [
-    "love",
-    "awesome",
-    "amazing",
-    "great",
-    "fantastic",
-    "excellent",
-    "happy",
-    "thrilled",
-    "excited",
-    "thanks",
-    "thank you",
-    "appreciate",
-    "best",
-    "impressed",
-  ],
-  negativeWords: [
-    "hate",
-    "terrible",
-    "awful",
-    "angry",
-    "furious",
-    "frustrated",
-    "disappointed",
-    "worst",
-    "buggy",
-    "trash",
-    "broken",
-    "complain",
-    "issue",
-    "problem",
-    "unacceptable",
-    "lag",
-  ],
-  positiveEmojis: ["😍", "🤩", "😊", "😁", "🔥", "✨", "💯", "❤️", "👍"],
-  negativeEmojis: ["💀", "😡", "🤬", "😤", "💔", "👎", "😠", "😭"],
-  negations: ["not", "never", "no", "isn't", "wasn't", "aren't", "can't", "won't"],
-};
+// ============================================================================
+// RETRY LOGIC
+// ============================================================================
 
-const NEGATION_PATTERN = lexicalConfig.negations
-  .map((term) =>
-    term
-      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      .replace(/\s+/g, "\\s+")
-  )
-  .join("|");
+/**
+ * Retry a function with exponential backoff
+ * @param {Function} fn - Async function to retry
+ * @param {number} maxRetries - Maximum number of retries
+ * @param {number} baseDelay - Base delay in milliseconds
+ * @returns {Promise<any>} - Result of the function
+ */
+async function retryWithBackoff(fn, maxRetries = CONFIG.maxRetries, baseDelay = CONFIG.retryDelayMs) {
+  let lastError;
 
-const countOccurrences = (text, tokens, useWordBoundary = true) => {
-  const lower = text.toLowerCase();
-  return tokens.reduce((sum, token) => {
-    if (!token) return sum;
-    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = useWordBoundary
-      ? new RegExp(`\\b${escaped}\\b`, "gi")
-      : new RegExp(escaped, "gi");
-    const matches = lower.match(regex);
-    return sum + (matches ? matches.length : 0);
-  }, 0);
-};
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
 
-const countEmojiOccurrences = (text, emojis) =>
-  emojis.reduce((sum, emoji) => sum + (text.split(emoji).length - 1), 0);
-
-const detectNegatedPhrases = (text, tokens) => {
-  if (!NEGATION_PATTERN) return 0;
-  const lower = text.toLowerCase();
-  return tokens.reduce((sum, token) => {
-    const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const phraseRegex = new RegExp(
-      `(?:${NEGATION_PATTERN})\\s+${escapedToken}`,
-      "gi"
-    );
-    const matches = lower.match(phraseRegex);
-    return sum + (matches ? matches.length : 0);
-  }, 0);
-};
-
-const evaluateLexicalHeuristics = (text = "") => {
-  if (!text || text.length < 4) return null;
-
-  const positiveHits = countOccurrences(text, lexicalConfig.positiveWords);
-  const negativeHits = countOccurrences(text, lexicalConfig.negativeWords);
-  const positiveEmojiHits = countEmojiOccurrences(text, lexicalConfig.positiveEmojis);
-  const negativeEmojiHits = countEmojiOccurrences(text, lexicalConfig.negativeEmojis);
-
-  const emphasisBonus = (text.match(/!+/g)?.length || 0) * 0.15;
-  const uppercaseWords = text
-    .split(/\s+/)
-    .filter(
-      (word) =>
-        word.length >= 4 &&
-        /[A-Z]/.test(word) &&
-        word === word.toUpperCase() &&
-        /[A-Z]/.test(word.replace(/[^A-Z]/g, ""))
-    ).length;
-
-  const negatedPositives = detectNegatedPhrases(text, lexicalConfig.positiveWords);
-  const negatedNegatives = detectNegatedPhrases(text, lexicalConfig.negativeWords);
-
-  const netPositive =
-    positiveHits + positiveEmojiHits - negatedPositives + uppercaseWords * 0.2;
-  const netNegative =
-    negativeHits + negativeEmojiHits - negatedNegatives + uppercaseWords * 0.1;
-
-  const netScore = netPositive - netNegative + emphasisBonus;
-  const magnitude = Math.abs(netScore);
-
-  if (magnitude < 1.2) {
-    return null;
+      if (attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        Logger.warn(`Retry attempt ${attempt + 1}/${maxRetries}`, {
+          delay,
+          error: error.message,
+        });
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
   }
 
-  const sentiment = netScore > 0 ? "positive" : "negative";
-  const confidence = Math.min(0.95, 0.55 + magnitude * 0.15);
-  const sentimentScore =
-    sentiment === "positive"
-      ? Math.min(0.95, 0.6 + magnitude * 0.1)
-      : Math.max(0.05, 0.4 - magnitude * 0.1);
+  throw new APIError("Max retries exceeded", {
+    maxRetries,
+    lastError: lastError.message,
+  });
+}
 
-  return {
-    sentiment,
-    sentimentScore,
-    confidence,
-    magnitude,
-    reason: `heuristic-${sentiment}`,
-  };
-};
+// ============================================================================
+// GEMINI API CALL
+// ============================================================================
+
+/**
+ * Call Gemini API for sentiment analysis
+ * @param {string} prompt - Analysis prompt
+ * @returns {Promise<Object>} - API response
+ */
+async function callGeminiAPI(prompt) {
+  const model = geminiManager.getModel();
+
+  const result = await model.generateContent({
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: prompt }],
+      },
+    ],
+    generationConfig: GENERATION_CONFIG,
+    safetySettings: SAFETY_SETTINGS,
+  });
+
+  const response = await result.response;
+  return response.text();
+}
+
+// ============================================================================
+// CORE SENTIMENT ANALYSIS
+// ============================================================================
 
 /**
  * Analyze sentiment of a single post using Gemini API
  * @param {Object} post - Post object to analyze
- * @returns {Promise<Object>} - { sentiment, sentimentScore, sentimentAnalyzedAt }
+ * @returns {Promise<Object>} - Sentiment analysis result
  */
-export const analyzePostSentiment = async (post) => {
-  const text = extractText(post);
+export async function analyzePostSentiment(post) {
+  const startTime = Date.now();
 
-  // If no text, return null (no data)
-  if (!text || text.length === 0) {
-    if (isDev()) {
-      console.warn("No text found in post for sentiment analysis:", {
+  try {
+    // Validate input
+    if (!post || typeof post !== "object") {
+      throw new ValidationError("Invalid post object", { post });
+    }
+
+    // Extract text
+    const text = extractText(post);
+
+    // Handle empty text
+    if (!text || text.length === 0) {
+      Logger.warn("No text found in post", {
         postId: post._id || post.id,
         platform: post.platform,
         hasContent: !!post.content,
-        hasText: !!post.text,
-        contentKeys: post.content ? Object.keys(post.content) : [],
       });
+
+      return {
+        sentiment: null,
+        sentimentScore: null,
+        sentimentConfidence: null,
+        sentimentAnalyzedAt: null,
+        sentimentSource: "none",
+        error: "NO_TEXT",
+      };
     }
-    return {
-      sentiment: null,
-      sentimentScore: null,
-      sentimentAnalyzedAt: null,
-    };
-  }
 
-  // Log for debugging (only in development)
-  if (isDev() && post.platform === "twitter") {
-    console.log("Analyzing Twitter post sentiment:", {
-      textLength: text.length,
-      textPreview: text.substring(0, 100),
+    Logger.debug("Analyzing post sentiment", {
+      postId: post._id || post.id,
       platform: post.platform,
+      textLength: text.length,
     });
-  }
 
-  try {
-    const geminiModel = initializeGemini();
-
+    // Build prompt
     const prompt = buildPrompt(post, text);
 
-    const result = await geminiModel.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }],
-        },
-      ],
-      generationConfig: GENERATION_CONFIG,
-      safetySettings: SAFETY_SETTINGS,
+    // Call API with retry logic
+    const responseText = await retryWithBackoff(() => callGeminiAPI(prompt));
+
+    Logger.debug("Gemini response received", {
+      responseLength: responseText.length,
     });
 
-    const response = await result.response;
-    const responseText = response.text();
+    // Parse and normalize response
+    const parsed = parseJsonResponse(responseText);
+    const normalized = normalizeSentimentResult(parsed);
 
-    // Log response for debugging (only in development)
-    if (isDev()) {
-      console.log("Gemini response received:", responseText.substring(0, 200));
-    }
+    const duration = Date.now() - startTime;
 
-    // Try to parse JSON from response
-    let parsedResponse;
-    let usedFallback = false;
-    try {
-      parsedResponse = tryParseJson(responseText);
-    } catch (parseError) {
-      console.warn(
-        "Failed to parse Gemini response as JSON, attempting text extraction:",
-        parseError.message
-      );
-      console.warn("Response text:", responseText.substring(0, 200));
-
-      // Enhanced text extraction with better pattern matching
-      const lowerText = responseText.toLowerCase();
-      let sentiment = "neutral";
-      let sentimentScore = 0.5;
-
-      // More sophisticated sentiment detection
-      const positiveIndicators = [
-        "positive",
-        "good",
-        "great",
-        "excellent",
-        "love",
-        "amazing",
-        "awesome",
-        "happy",
-        "satisfied",
-      ];
-      const negativeIndicators = [
-        "negative",
-        "bad",
-        "terrible",
-        "hate",
-        "awful",
-        "disappointed",
-        "angry",
-        "frustrated",
-        "complaint",
-      ];
-
-      const hasPositive = positiveIndicators.some((ind) =>
-        lowerText.includes(ind)
-      );
-      const hasNegative = negativeIndicators.some((ind) =>
-        lowerText.includes(ind)
-      );
-
-      if (hasPositive && !hasNegative) {
-        sentiment = "positive";
-        sentimentScore = 0.7;
-      } else if (hasNegative && !hasPositive) {
-        sentiment = "negative";
-        sentimentScore = 0.3;
-      } else if (hasPositive && hasNegative) {
-        // Mixed sentiment - determine which is stronger
-        const positiveCount = positiveIndicators.filter((ind) =>
-          lowerText.includes(ind)
-        ).length;
-        const negativeCount = negativeIndicators.filter((ind) =>
-          lowerText.includes(ind)
-        ).length;
-        if (positiveCount > negativeCount) {
-          sentiment = "positive";
-          sentimentScore = 0.6;
-        } else {
-          sentiment = "negative";
-          sentimentScore = 0.4;
-        }
-      }
-
-      parsedResponse = { sentiment, sentimentScore };
-      usedFallback = true;
-    }
-
-    const normalized = normalizeSentimentResult(parsedResponse);
-    const lexicalAdjustment = evaluateLexicalHeuristics(text);
-
-    const confidenceOrScore =
-      normalized.sentimentConfidence ?? normalized.sentimentScore ?? 0.5;
-    const nearNeutralScore =
-      Math.abs((normalized.sentimentScore ?? 0.5) - 0.5) < 0.12;
-
-    const shouldApplyLexical =
-      lexicalAdjustment &&
-      (normalized.sentiment === "neutral" ||
-        confidenceOrScore < 0.45 ||
-        nearNeutralScore);
-
-    const finalSentiment = shouldApplyLexical
-      ? lexicalAdjustment.sentiment
-      : normalized.sentiment;
-    const finalScore = shouldApplyLexical
-      ? lexicalAdjustment.sentimentScore
-      : normalized.sentimentScore;
-    const finalConfidence = shouldApplyLexical
-      ? lexicalAdjustment.confidence
-      : normalized.confidence;
-
-    const fallbackReasons = [];
-    if (usedFallback) fallbackReasons.push("parse");
-    if (shouldApplyLexical) fallbackReasons.push("lexical");
+    Logger.info("Sentiment analysis completed", {
+      postId: post._id || post.id,
+      sentiment: normalized.sentiment,
+      score: normalized.sentimentScore,
+      duration,
+    });
 
     return {
-      sentiment: finalSentiment,
-      sentimentScore: finalScore,
+      sentiment: normalized.sentiment,
+      sentimentScore: normalized.sentimentScore,
+      sentimentConfidence: normalized.confidence,
       sentimentAnalyzedAt: new Date(),
-      sentimentConfidence: finalConfidence,
-      sentimentSource: shouldApplyLexical ? "gemini+heuristic" : "gemini",
-      sentimentFallback: fallbackReasons.length > 0,
-      sentimentFallbackReason: fallbackReasons,
-      heuristicMeta: shouldApplyLexical ? lexicalAdjustment : null,
+      sentimentSource: "gemini",
+      sentimentExplanation: parsed.explanation || null,
+      processingTimeMs: duration,
     };
   } catch (error) {
-    console.error("Gemini sentiment analysis error:", {
-      message: error.message,
-      stack: error.stack,
-      postPlatform: post?.platform,
-      textLength: text?.length,
-      textPreview: text?.substring(0, 50),
+    const duration = Date.now() - startTime;
+
+    Logger.error("Sentiment analysis failed", error, {
+      postId: post?._id || post?.id,
+      platform: post?.platform,
+      errorType: error.name,
+      errorCode: error.code,
+      duration,
     });
 
-    // Return null on error (no data available)
+    // Return error state
     return {
       sentiment: null,
       sentimentScore: null,
+      sentimentConfidence: null,
       sentimentAnalyzedAt: null,
+      sentimentSource: "error",
+      error: error.code || "UNKNOWN_ERROR",
+      errorMessage: error.message,
+      processingTimeMs: duration,
     };
   }
-};
+}
+
+// ============================================================================
+// BATCH SENTIMENT ANALYSIS
+// ============================================================================
 
 /**
- * Analyze sentiment for multiple posts in batch
+ * Analyze sentiment for multiple posts in batch with progress tracking
  * @param {Array<Object>} posts - Array of post objects
- * @param {number} concurrency - Number of concurrent requests (default: 5)
- * @returns {Promise<Array<Object>>} - Array of posts with sentiment analysis
+ * @param {Object} options - Options for batch processing
+ * @param {number} options.concurrency - Number of concurrent requests
+ * @param {Function} options.onProgress - Progress callback
+ * @returns {Promise<Object>} - Results with success/failure counts
  */
-export const analyzePostsSentiment = async (posts, concurrency = 5) => {
-  if (!posts || posts.length === 0) {
-    return [];
+export async function analyzePostsSentiment(posts, options = {}) {
+  const {
+    concurrency = CONFIG.defaultConcurrency,
+    onProgress = null,
+  } = options;
+
+  // Validate input
+  if (!Array.isArray(posts)) {
+    throw new ValidationError("Posts must be an array", { type: typeof posts });
   }
 
+  if (posts.length === 0) {
+    return {
+      results: [],
+      total: 0,
+      successful: 0,
+      failed: 0,
+      errors: [],
+    };
+  }
+
+  Logger.info("Starting batch sentiment analysis", {
+    totalPosts: posts.length,
+    concurrency,
+  });
+
   const results = [];
-  
-  // Process in batches to avoid overwhelming the API
+  const errors = [];
+  let successful = 0;
+  let failed = 0;
+
+  // Process in batches
   for (let i = 0; i < posts.length; i += concurrency) {
     const batch = posts.slice(i, i + concurrency);
-    const batchResults = await Promise.all(
-      batch.map(async (post) => {
+    const batchNumber = Math.floor(i / concurrency) + 1;
+    const totalBatches = Math.ceil(posts.length / concurrency);
+
+    Logger.debug(`Processing batch ${batchNumber}/${totalBatches}`, {
+      batchSize: batch.length,
+    });
+
+    const batchResults = await Promise.allSettled(
+      batch.map(async (post, index) => {
         const sentimentData = await analyzePostSentiment(post);
+        
+        // Track success/failure
+        if (sentimentData.sentiment) {
+          successful++;
+        } else {
+          failed++;
+          errors.push({
+            postId: post._id || post.id,
+            error: sentimentData.error,
+            message: sentimentData.errorMessage,
+          });
+        }
+
+        // Call progress callback if provided
+        if (onProgress) {
+          onProgress({
+            processed: i + index + 1,
+            total: posts.length,
+            successful,
+            failed,
+          });
+        }
+
         return {
           ...post,
           sentiment: sentimentData.sentiment,
           sentimentScore: sentimentData.sentimentScore,
-          sentimentConfidence: sentimentData.sentimentConfidence ?? null,
-          sentimentSource: sentimentData.sentimentSource || "gemini",
-          sentimentFallback: sentimentData.sentimentFallback ?? false,
+          sentimentConfidence: sentimentData.sentimentConfidence,
           sentimentAnalyzedAt: sentimentData.sentimentAnalyzedAt,
+          sentimentSource: sentimentData.sentimentSource,
+          sentimentExplanation: sentimentData.sentimentExplanation,
+          sentimentError: sentimentData.error || null,
           analysis: {
             ...(post.analysis || {}),
             sentiment: sentimentData.sentiment,
-            sentimentConfidence: sentimentData.sentimentConfidence ?? null,
-            sentimentSource: sentimentData.sentimentSource || "gemini",
-            sentimentFallback: sentimentData.sentimentFallback ?? false,
-            sentimentFallbackReason: sentimentData.sentimentFallbackReason || [],
-            heuristicMeta: sentimentData.heuristicMeta || null,
+            sentimentConfidence: sentimentData.sentimentConfidence,
+            sentimentSource: sentimentData.sentimentSource,
+            sentimentExplanation: sentimentData.sentimentExplanation,
+            processingTimeMs: sentimentData.processingTimeMs,
           },
         };
       })
     );
-    results.push(...batchResults);
+
+    // Extract results from settled promises
+    const batchProcessed = batchResults.map((result) => {
+      if (result.status === "fulfilled") {
+        return result.value;
+      } else {
+        Logger.error("Batch processing error", result.reason);
+        return null;
+      }
+    }).filter(Boolean);
+
+    results.push(...batchProcessed);
+
+    // Add a small delay between batches to avoid rate limiting
+    if (i + concurrency < posts.length) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   }
 
-  return results;
-};
+  Logger.info("Batch sentiment analysis completed", {
+    total: posts.length,
+    successful,
+    failed,
+    successRate: ((successful / posts.length) * 100).toFixed(2) + "%",
+  });
 
+  return {
+    results,
+    total: posts.length,
+    successful,
+    failed,
+    errors,
+    successRate: (successful / posts.length) * 100,
+  };
+}
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Validate API configuration
+ * @returns {boolean} - True if configuration is valid
+ */
+export function validateConfiguration() {
+  try {
+    if (!CONFIG.apiKey) {
+      throw new ConfigurationError("GEMINI_API_KEY is not set");
+    }
+    return true;
+  } catch (error) {
+    Logger.error("Configuration validation failed", error);
+    return false;
+  }
+}
+
+/**
+ * Get current configuration (without sensitive data)
+ * @returns {Object} - Safe configuration object
+ */
+export function getConfiguration() {
+  return {
+    model: CONFIG.model,
+    defaultConcurrency: CONFIG.defaultConcurrency,
+    maxRetries: CONFIG.maxRetries,
+    retryDelayMs: CONFIG.retryDelayMs,
+    hasApiKey: !!CONFIG.apiKey,
+  };
+}
+
+/**
+ * Reset the Gemini client (useful for testing)
+ */
+export function resetClient() {
+  geminiManager.reset();
+  Logger.info("Gemini client reset");
+}
