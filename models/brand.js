@@ -50,6 +50,7 @@ const brandSchema = new mongoose.Schema(
     aiFriendlyName: { type: String },
     ticketCreation: { type: Boolean, default: false },
     keywordGroups: [keywordGroupSchema],
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, // admin who created
     assignedUsers: [{ type: String, trim: true }],
     active: { type: Boolean, default: true },
   },
