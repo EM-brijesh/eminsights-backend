@@ -6,6 +6,7 @@ import { fetchTwitterSearch } from "../services/twitter.service.js";
 import { fetchRedditSearch } from "../services/reddit.service.js";
 import { scheduleKeywordGroup } from "../utils/cronManager.js";
 import { fetchGoogleSearch } from "../services/google.service.js";
+import { analyzePostsSentiment } from "../services/sentiment.service.js";
 
 const REALTIME_PLATFORM_FETCHERS = {
   youtube: fetchYouTubeSearch,
@@ -72,6 +73,111 @@ const deriveGroupExecutions = (brand) => {
   return [];
 };
 
+/**
+ * Analyze posts with sentiment before saving to database
+ * Processes ALL posts synchronously with no limits
+ * @param {Array} posts - Array of post objects to analyze
+ * @returns {Promise<Array>} - Posts with sentiment data merged
+ */
+const analyzePostsBeforeSave = async (posts) => {
+  if (!Array.isArray(posts) || posts.length === 0) {
+    return posts;
+  }
+
+  try {
+    console.log(`Analyzing ${posts.length} posts for sentiment before saving...`);
+    
+    // Analyze all posts with no limits - process entire array
+    const analysisResult = await analyzePostsSentiment(posts, {
+      concurrency: 5, // Default concurrency
+    });
+
+    const analyzedPosts = analysisResult.results || [];
+    const analyzedCount = analysisResult.successful || 0;
+    const failedCount = analysisResult.failed || 0;
+    const errors = analysisResult.errors || [];
+
+    console.log(`Sentiment analysis completed: ${analyzedCount} successful, ${failedCount} failed out of ${posts.length} total`);
+    
+    // Log detailed failure statistics
+    if (errors.length > 0) {
+      const failuresByPlatform = {};
+      const failuresByError = {};
+      errors.forEach((err) => {
+        const platform = err.platform || 'unknown';
+        const errorType = err.error || 'UNKNOWN';
+        failuresByPlatform[platform] = (failuresByPlatform[platform] || 0) + 1;
+        failuresByError[errorType] = (failuresByError[errorType] || 0) + 1;
+      });
+      console.log(`Failures by platform:`, failuresByPlatform);
+      console.log(`Failures by error type:`, failuresByError);
+      
+      // Log sample errors for debugging
+      const sampleErrors = errors.slice(0, 5);
+      console.log(`Sample errors (first 5):`, sampleErrors.map(e => ({
+        platform: e.platform,
+        error: e.error,
+        hasText: e.hasText,
+        textLength: e.textLength,
+      })));
+    }
+
+    // Use index-based matching since analyzePostsSentiment returns results in the same order as input
+    // This is more reliable than ID matching for new posts that don't have _id yet
+    return posts.map((post, index) => {
+      const analyzed = analyzedPosts[index];
+      
+      // If we have an analyzed result at this index, merge sentiment data
+      if (analyzed && analyzed.sentiment) {
+        return {
+          ...post,
+          sentiment: analyzed.sentiment || null,
+          sentimentScore: analyzed.sentimentScore || null,
+          sentimentConfidence: analyzed.sentimentConfidence || null,
+          sentimentAnalyzedAt: analyzed.sentimentAnalyzedAt || new Date(),
+          sentimentSource: analyzed.sentimentSource || null,
+          sentimentExplanation: analyzed.sentimentExplanation || null,
+          analysis: {
+            ...(post.analysis || {}),
+            sentiment: analyzed.sentiment || null,
+            sentimentConfidence: analyzed.sentimentConfidence || null,
+            sentimentSource: analyzed.sentimentSource || null,
+            sentimentExplanation: analyzed.sentimentExplanation || null,
+            processingTimeMs: analyzed.processingTimeMs || null,
+          },
+        };
+      }
+      
+      // If analysis failed or returned null sentiment, log it but still return the post
+      if (analyzed && analyzed.sentimentError) {
+        const textPreview = (post.content?.text || post.content?.title || post.text || post.title || '').substring(0, 100);
+        console.warn(`Post analysis failed at index ${index}:`, {
+          platform: post.platform,
+          keyword: post.keyword,
+          error: analyzed.sentimentError,
+          errorMessage: analyzed.sentimentError?.message || analyzed.errorMessage,
+          hasText: !!(post.content?.text || post.content?.title || post.text || post.title),
+          textLength: textPreview.length,
+          textPreview: textPreview || '(no text)',
+        });
+      } else if (!analyzed) {
+        // Post wasn't in results array (shouldn't happen, but log if it does)
+        console.warn(`Post at index ${index} was not in analysis results:`, {
+          platform: post.platform,
+          keyword: post.keyword,
+        });
+      }
+      
+      // Return original post (with null sentiment) if analysis failed or wasn't found
+      return post;
+    });
+  } catch (error) {
+    console.error("Error analyzing posts for sentiment:", error);
+    // Return original posts if analysis fails - don't block database insertion
+    return posts;
+  }
+};
+
 export const runSearchForBrand = async (req, res) => {
   try {
     const { brandName } = req.body;
@@ -102,7 +208,7 @@ export const runSearchForBrand = async (req, res) => {
     const endDate = new Date(now.getTime() - 10 * 1000);
 
     const results = {};
-    const saveOps = [];
+    const allPostsToInsert = [];
 
     // Loop over all platforms
     for (const platform of platforms) {
@@ -136,11 +242,16 @@ export const runSearchForBrand = async (req, res) => {
             startDate,
             endDate,
           });
+        } else if (platform === "google") {
+          fetchedData = await fetchGoogleSearch(keyword, {
+            include: includeKeywords,
+            exclude: excludeKeywords,
+          });
         }
 
         results[platform].push(...fetchedData);
 
-        // Prepare for DB save
+        // Prepare posts for analysis and save
         if (fetchedData.length) {
           const docs = fetchedData.map((item) => ({
             ...item,
@@ -151,12 +262,43 @@ export const runSearchForBrand = async (req, res) => {
             createdAt: new Date(item.createdAt || item.publishedAt || Date.now()),
             fetchedAt: new Date(),
           }));
-          saveOps.push(SocialPost.insertMany(docs, { ordered: false }));
+          allPostsToInsert.push(...docs);
         }
       }
     }
 
-    await Promise.all(saveOps);
+    // Analyze ALL posts with sentiment before saving
+    let analyzedPosts = allPostsToInsert;
+    let analyzedCount = 0;
+    let failedCount = 0;
+    const totalScraped = allPostsToInsert.length;
+
+    if (allPostsToInsert.length > 0) {
+      analyzedPosts = await analyzePostsBeforeSave(allPostsToInsert);
+      // Count how many got sentiment
+      analyzedCount = analyzedPosts.filter(p => p.sentiment).length;
+      failedCount = totalScraped - analyzedCount;
+    }
+
+    // Save posts with sentiment already included
+    let savedCount = 0;
+    if (analyzedPosts.length > 0) {
+      try {
+        await SocialPost.insertMany(analyzedPosts, { ordered: false });
+        savedCount = analyzedPosts.length;
+      } catch (saveError) {
+        console.error("Error saving posts:", saveError);
+        // Try to save posts individually if batch fails
+        for (const post of analyzedPosts) {
+          try {
+            await SocialPost.create(post);
+            savedCount++;
+          } catch (err) {
+            console.error("Failed to save individual post:", err.message);
+          }
+        }
+      }
+    }
 
     res.json({
       success: true,
@@ -165,7 +307,14 @@ export const runSearchForBrand = async (req, res) => {
         youtube: results.youtube?.length || 0,
         twitter: results.twitter?.length || 0,
         reddit: results.reddit?.length || 0,
+        google: results.google?.length || 0,
       },
+      sentimentAnalysis: {
+        totalScraped,
+        analyzed: analyzedCount,
+        failed: failedCount,
+      },
+      saved: savedCount,
     });
   } catch (err) {
     console.error("Brand Search Error:", err);
@@ -352,16 +501,51 @@ export const runSearch = async (req, res) => {
       }
     }
 
+    // Analyze ALL posts with sentiment before saving
+    let analyzedPosts = postsToInsert;
+    let analyzedCount = 0;
+    let failedCount = 0;
+    const totalScraped = postsToInsert.length;
+
     if (postsToInsert.length > 0) {
-      await SocialPost.insertMany(postsToInsert, { ordered: false });
+      analyzedPosts = await analyzePostsBeforeSave(postsToInsert);
+      // Count how many got sentiment
+      analyzedCount = analyzedPosts.filter(p => p.sentiment).length;
+      failedCount = totalScraped - analyzedCount;
+    }
+
+    // Save posts with sentiment already included
+    let savedCount = 0;
+    if (analyzedPosts.length > 0) {
+      try {
+        await SocialPost.insertMany(analyzedPosts, { ordered: false });
+        savedCount = analyzedPosts.length;
+      } catch (saveError) {
+        console.error("Error saving posts:", saveError);
+        // Try to save posts individually if batch fails
+        for (const post of analyzedPosts) {
+          try {
+            await SocialPost.create(post);
+            savedCount++;
+          } catch (err) {
+            console.error("Failed to save individual post:", err.message);
+          }
+        }
+      }
     }
 
     res.json({
       success: true,
       brandName: brand.brandName,
       groupsExecuted: groupsToExecute.length,
-      fetched: postsToInsert.length,
+      fetched: totalScraped,
       summary,
+      sentimentAnalysis: {
+        totalScraped,
+        analyzed: analyzedCount,
+        failed: failedCount,
+      },
+      saved: savedCount,
     });
   } catch (err) {
     console.error("Search Run Error:", err);
@@ -527,8 +711,37 @@ export const runKeywordGroupSearch = async (req, res) => {
       }
     }
 
+    // Analyze ALL posts with sentiment before saving
+    let analyzedPosts = postsToInsert;
+    let analyzedCount = 0;
+    let failedCount = 0;
+    const totalScraped = postsToInsert.length;
+
     if (postsToInsert.length > 0) {
-      await SocialPost.insertMany(postsToInsert, { ordered: false });
+      analyzedPosts = await analyzePostsBeforeSave(postsToInsert);
+      // Count how many got sentiment
+      analyzedCount = analyzedPosts.filter(p => p.sentiment).length;
+      failedCount = totalScraped - analyzedCount;
+    }
+
+    // Save posts with sentiment already included
+    let savedCount = 0;
+    if (analyzedPosts.length > 0) {
+      try {
+        await SocialPost.insertMany(analyzedPosts, { ordered: false });
+        savedCount = analyzedPosts.length;
+      } catch (saveError) {
+        console.error("Error saving posts:", saveError);
+        // Try to save posts individually if batch fails
+        for (const post of analyzedPosts) {
+          try {
+            await SocialPost.create(post);
+            savedCount++;
+          } catch (err) {
+            console.error("Failed to save individual post:", err.message);
+          }
+        }
+      }
     }
 
     res.json({
@@ -536,8 +749,14 @@ export const runKeywordGroupSearch = async (req, res) => {
       brandName: brand.brandName,
       groupName: group.groupName,
       keywordsExecuted: group.keywords.length,
-      fetched: postsToInsert.length,
+      fetched: totalScraped,
       summary,
+      sentimentAnalysis: {
+        totalScraped,
+        analyzed: analyzedCount,
+        failed: failedCount,
+      },
+      saved: savedCount,
     });
   } catch (err) {
     console.error("Group Search Run Error:", err);

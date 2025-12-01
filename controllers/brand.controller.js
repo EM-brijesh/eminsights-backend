@@ -1,4 +1,55 @@
+import mongoose from "mongoose";
 import { Brand } from "../models/brand.js";
+
+const normalizeStringArray = (value, { lowercase = false } = {}) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (typeof item !== "string") return "";
+      const trimmed = item.trim();
+      return lowercase ? trimmed.toLowerCase() : trimmed;
+    })
+    .filter(Boolean);
+};
+
+const sanitizeKeywordGroupPayload = (group) => {
+  if (!group) return null;
+  const resolvedName = (group.groupName || group.name || "").trim();
+  if (!resolvedName) return null;
+
+  const keywords = normalizeStringArray(group.keywords);
+  if (keywords.length === 0) return null;
+
+  const includeKeywords = normalizeStringArray(group.includeKeywords);
+  const excludeKeywords = normalizeStringArray(group.excludeKeywords);
+  const platforms = normalizeStringArray(group.platforms, { lowercase: true });
+  const assignedUsers = normalizeStringArray(group.assignedUsers, { lowercase: true });
+  const language = group.language || group.languages?.[0] || "en";
+  const country = group.country || group.countries?.[0] || "IN";
+  const frequency = group.frequency || "30m";
+
+  const payload = {
+    groupName: resolvedName,
+    name: resolvedName,
+    keywords,
+    includeKeywords,
+    excludeKeywords,
+    platforms,
+    language,
+    country,
+    frequency,
+    assignedUsers,
+    paused: !!group.paused,
+    status: group.status || (group.paused ? "paused" : "running"),
+  };
+
+  const potentialId = group._id || group.mongoId || group.id;
+  if (potentialId && mongoose.Types.ObjectId.isValid(potentialId)) {
+    payload._id = new mongoose.Types.ObjectId(potentialId);
+  }
+
+  return payload;
+};
 
 /* ---------------------------------------------------
    CREATE BRAND (Brand-level metadata only)
@@ -93,6 +144,7 @@ export const configureBrand = async (req, res) => {
       platforms,
       includeKeywords,
       excludeKeywords,
+      keywordGroups,
     } = req.body;
 
     if (!brandName)
@@ -126,6 +178,13 @@ export const configureBrand = async (req, res) => {
       brand.excludeKeywords = excludeKeywords.map((k) => String(k).trim()).filter(Boolean);
     }
     if (typeof active === "boolean") brand.active = active;
+
+    if (Array.isArray(keywordGroups)) {
+      const sanitizedGroups = keywordGroups
+        .map(sanitizeKeywordGroupPayload)
+        .filter(Boolean);
+      brand.keywordGroups = sanitizedGroups;
+    }
 
     // -------- SAFE USER UPDATE --------
     // Only update assignedUsers when array exists AND has values
