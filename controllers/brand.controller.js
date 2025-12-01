@@ -70,9 +70,15 @@ export const createBrand = async (req, res) => {
     if (existing)
       return res.status(400).json({ success: false, message: "Brand already exists" });
 
+    // ensure admin exists in req.user
+    const adminId = req.user?._id || req.user?.id;
+    if (!adminId)
+      return res.status(401).json({ success: false, message: "Unauthorized – admin not found" });
+
     const brand = await Brand.create({
       brandName: normalizedName,
       description,
+      createdBy: adminId, // store who created it
     });
 
     res.json({ success: true, brand });
@@ -81,6 +87,7 @@ export const createBrand = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
 
 /* ---------------------------------------------------
    ASSIGN USERS TO BRAND (Brand admin users)
