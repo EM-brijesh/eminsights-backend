@@ -1,21 +1,33 @@
-import {
-  GoogleGenerativeAI,
-  HarmBlockThreshold,
-  HarmCategory,
-} from "@google/generative-ai";
+// ============================================================================
+// GEMINI CODE COMMENTED OUT - NOW USING KERAS BERT MODEL VIA PYTHON SERVICE
+// ============================================================================
+// import {
+//   GoogleGenerativeAI,
+//   HarmBlockThreshold,
+//   HarmCategory,
+// } from "@google/generative-ai";
+
+import axios from "axios";
 
 // ============================================================================
 // CONFIGURATION & CONSTANTS
 // ============================================================================
 
+// Python FastAPI service configuration
 const CONFIG = {
-  apiKey: process.env.GEMINI_API_KEY,
-  model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
-  defaultConcurrency: 5,
-  maxRetries: 3,
+  get serviceUrl() {
+    return process.env.SENTIMENT_SERVICE_URL || "http://localhost:8000";
+  },
+  // No rate limiting needed for local model
+  defaultConcurrency: 10, // Can process multiple posts concurrently
+  maxRetries: 2, // Simple retry for network errors only
   retryDelayMs: 1000,
-  requestTimeoutMs: 30000,
+  requestTimeoutMs: 60000, // 60 seconds timeout for model inference
 };
+
+// ============================================================================
+// RATE LIMITER REMOVED - No longer needed for local model
+// ============================================================================
 
 const SENTIMENT_LABELS = ["positive", "neutral", "negative"];
 
@@ -25,59 +37,11 @@ const DEFAULT_SCORES = {
   negative: 0.28,
 };
 
-const GENERATION_CONFIG = {
-  temperature: 0.2,
-  topP: 0.8,
-  topK: 40,
-  maxOutputTokens: 256,
-  responseMimeType: "application/json",
-  responseSchema: {
-    type: "object",
-    properties: {
-      sentiment: {
-        type: "string",
-        enum: SENTIMENT_LABELS,
-        description: "Overall sentiment classification for the post.",
-      },
-      sentimentScore: {
-        type: "number",
-        minimum: 0,
-        maximum: 1,
-        description: "Confidence score scaled between 0 (negative) and 1 (positive).",
-      },
-      confidence: {
-        type: "number",
-        minimum: 0,
-        maximum: 1,
-        description: "Model confidence in the classification.",
-      },
-      explanation: {
-        type: "string",
-        description: "Optional short rationale for the classification.",
-      },
-    },
-    required: ["sentiment", "sentimentScore"],
-  },
-};
-
-const SAFETY_SETTINGS = [
-  {
-    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-  },
-];
+// ============================================================================
+// GEMINI CONFIG COMMENTED OUT
+// ============================================================================
+// const GENERATION_CONFIG = { ... };
+// const SAFETY_SETTINGS = [ ... ];
 
 // ============================================================================
 // ERROR CLASSES
@@ -161,46 +125,10 @@ const Logger = {
 };
 
 // ============================================================================
-// GEMINI CLIENT MANAGER
+// GEMINI CLIENT MANAGER COMMENTED OUT
 // ============================================================================
-
-class GeminiClientManager {
-  constructor() {
-    this.client = null;
-    this.model = null;
-  }
-
-  initialize() {
-    if (!CONFIG.apiKey) {
-      throw new ConfigurationError(
-        "GEMINI_API_KEY environment variable is required",
-        { available: false }
-      );
-    }
-
-    if (!this.client) {
-      this.client = new GoogleGenerativeAI(CONFIG.apiKey);
-      this.model = this.client.getGenerativeModel({ model: CONFIG.model });
-      Logger.info("Gemini client initialized", { model: CONFIG.model });
-    }
-
-    return this.model;
-  }
-
-  getModel() {
-    if (!this.model) {
-      return this.initialize();
-    }
-    return this.model;
-  }
-
-  reset() {
-    this.client = null;
-    this.model = null;
-  }
-}
-
-const geminiManager = new GeminiClientManager();
+// class GeminiClientManager { ... }
+// const geminiManager = new GeminiClientManager();
 
 // ============================================================================
 // TEXT EXTRACTION
@@ -216,7 +144,19 @@ function extractText(post) {
     return "";
   }
 
-  // Try multiple fields to get text content
+  // Special handling for Google posts - combine title and snippet for better analysis
+  if (post.platform === "google" || post.platform === "Google") {
+    const title = post?.content?.title || post?.title || "";
+    const snippet = post?.content?.text || post?.content?.description || post?.text || "";
+    const combined = `${title} ${snippet}`.trim();
+    
+    if (combined.length >= 3) {
+      return combined.replace(/\s+/g, " ");
+    }
+    return "";
+  }
+
+  // For other platforms, try multiple fields to get text content
   const text =
     post?.content?.text ||
     post?.content?.description ||
@@ -241,77 +181,10 @@ function extractText(post) {
 }
 
 // ============================================================================
-// PROMPT BUILDING
+// PROMPT BUILDING COMMENTED OUT - Not needed for BERT model
 // ============================================================================
-
-/**
- * Build the prompt for sentiment analysis
- * @param {Object} post - Post object
- * @param {string} text - Extracted text content
- * @returns {string} - Formatted prompt
- */
-function buildPrompt(post = {}, text = "") {
-  const metadata = {
-    brand: post.brandName || post.brand || "unknown",
-    platform: post.platform || "unknown",
-    keyword: post.keyword || post.content?.keyword || "unspecified",
-    language: post.language || post.locale || "unknown",
-    createdAt: post.createdAt || post.publishedAt || null,
-    author: post.author || post.user || null,
-    hasMedia: Boolean(post.media?.length || post.content?.mediaUrl),
-  };
-
-  return `You are an expert social-media sentiment analyst. Classify the overall sentiment for the following post.
-
-METADATA (JSON):
-${JSON.stringify(metadata, null, 2)}
-
-POST CONTENT:
-"""
-${text}
-"""
-
-CLASSIFICATION RULES:
-1. POSITIVE: Praise, excitement, satisfaction, support, gratitude (even if short or using emojis/slang).
-2. NEGATIVE: Complaints, frustration, anger, disappointment, sarcasm targeting the brand, or repeated issues.
-3. NEUTRAL: Factual statements, news, questions, or updates without emotional tone.
-4. Do NOT default to "neutral" when there is clear praise/complaint, even if the post is brief or uses sarcasm.
-5. Account for emojis, emphasis (!!!), negations, and informal spelling before deciding the class.
-
-Return JSON exactly matching the provided schema.`;
-}
-
-// ============================================================================
-// JSON PARSING
-// ============================================================================
-
-/**
- * Parse JSON response from Gemini, handling various formats
- * @param {string} rawText - Raw response text
- * @returns {Object} - Parsed JSON object
- */
-function parseJsonResponse(rawText = "") {
-  let cleanResponse = rawText.trim();
-  
-  // Remove markdown code blocks
-  cleanResponse = cleanResponse
-    .replace(/```json\s*/gi, "")
-    .replace(/```\s*$/gi, "");
-
-  // Try to extract JSON object
-  const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
-  const candidate = jsonMatch ? jsonMatch[0] : cleanResponse;
-
-  try {
-    return JSON.parse(candidate);
-  } catch (error) {
-    throw new ValidationError("Failed to parse JSON response", {
-      rawText: rawText.substring(0, 200),
-      cleanedText: candidate.substring(0, 200),
-      error: error.message,
-    });
-  }
-}
+// function buildPrompt(post = {}, text = "") { ... }
+// function parseJsonResponse(rawText = "") { ... }
 
 // ============================================================================
 // RESULT NORMALIZATION
@@ -341,11 +214,11 @@ function normalizeSentimentResult(parsed = {}) {
 }
 
 // ============================================================================
-// RETRY LOGIC
+// RETRY LOGIC - Simplified for network errors only
 // ============================================================================
 
 /**
- * Retry a function with exponential backoff
+ * Simple retry for network errors
  * @param {Function} fn - Async function to retry
  * @param {number} maxRetries - Maximum number of retries
  * @param {number} baseDelay - Base delay in milliseconds
@@ -360,48 +233,114 @@ async function retryWithBackoff(fn, maxRetries = CONFIG.maxRetries, baseDelay = 
     } catch (error) {
       lastError = error;
 
-      if (attempt < maxRetries) {
+      // Only retry on network errors (ECONNREFUSED, ETIMEDOUT, etc.)
+      const isNetworkError = error.code === 'ECONNREFUSED' || 
+                            error.code === 'ETIMEDOUT' ||
+                            error.code === 'ENOTFOUND' ||
+                            (error.response && error.response.status >= 500);
+
+      if (attempt < maxRetries && isNetworkError) {
         const delay = baseDelay * Math.pow(2, attempt);
         Logger.warn(`Retry attempt ${attempt + 1}/${maxRetries}`, {
-          delay,
-          error: error.message,
+          delay: Math.round(delay / 1000) + "s",
+          error: error.message?.substring(0, 100),
         });
         await new Promise((resolve) => setTimeout(resolve, delay));
+      } else if (!isNetworkError) {
+        // Don't retry non-network errors
+        throw error;
       }
     }
   }
 
   throw new APIError("Max retries exceeded", {
     maxRetries,
-    lastError: lastError.message,
+    lastError: lastError?.message,
   });
 }
 
 // ============================================================================
-// GEMINI API CALL
+// PYTHON SERVICE API CALL
 // ============================================================================
 
 /**
- * Call Gemini API for sentiment analysis
- * @param {string} prompt - Analysis prompt
- * @returns {Promise<Object>} - API response
+ * Call Python FastAPI service for sentiment analysis
+ * @param {Array<Object>} posts - Array of post objects to analyze
+ * @returns {Promise<Array>} - Array of sentiment analysis results
  */
-async function callGeminiAPI(prompt) {
-  const model = geminiManager.getModel();
+async function callPythonService(posts) {
+  const serviceUrl = CONFIG.serviceUrl;
+  const endpoint = `${serviceUrl}/analyze`;
 
-  const result = await model.generateContent({
-    contents: [
+  try {
+    Logger.debug("Calling Python service", {
+      endpoint,
+      postCount: posts.length,
+    });
+
+    const response = await axios.post(
+      endpoint,
+      { posts },
       {
-        role: "user",
-        parts: [{ text: prompt }],
-      },
-    ],
-    generationConfig: GENERATION_CONFIG,
-    safetySettings: SAFETY_SETTINGS,
-  });
+        timeout: CONFIG.requestTimeoutMs,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
-  const response = await result.response;
-  return response.text();
+    if (response.data && response.data.results) {
+      Logger.debug("Python service response received", {
+        resultCount: response.data.results.length,
+      });
+      return response.data.results;
+    }
+
+    throw new APIError("Invalid response format from Python service", {
+      response: response.data,
+    });
+  } catch (error) {
+    if (error.response) {
+      // Python service returned an error
+      Logger.error("Python service returned error", {
+        status: error.response.status,
+        data: error.response.data,
+      });
+      throw new APIError(
+        `Python service error: ${error.response.data?.detail || error.response.statusText}`,
+        {
+          status: error.response.status,
+          data: error.response.data,
+        }
+      );
+    } else if (error.request) {
+      // Request was made but no response received
+      Logger.error("Python service connection failed", {
+        endpoint,
+        code: error.code,
+        message: error.message,
+      });
+      throw new APIError(
+        `Python service is not responding at ${endpoint}. Make sure the service is running.`,
+        {
+          code: error.code,
+          message: error.message,
+          endpoint,
+        }
+      );
+    } else {
+      // Error setting up request
+      Logger.error("Failed to setup request to Python service", {
+        endpoint,
+        code: error.code,
+        message: error.message,
+      });
+      throw new APIError(`Failed to call Python service: ${error.message}`, {
+        code: error.code,
+        endpoint,
+      });
+    }
+  }
 }
 
 // ============================================================================
@@ -409,7 +348,7 @@ async function callGeminiAPI(prompt) {
 // ============================================================================
 
 /**
- * Analyze sentiment of a single post using Gemini API
+ * Analyze sentiment of a single post using Python BERT service
  * @param {Object} post - Post object to analyze
  * @returns {Promise<Object>} - Sentiment analysis result
  */
@@ -449,36 +388,30 @@ export async function analyzePostSentiment(post) {
       textLength: text.length,
     });
 
-    // Build prompt
-    const prompt = buildPrompt(post, text);
+    // Call Python service with retry logic for network errors
+    const results = await retryWithBackoff(() => callPythonService([post]));
 
-    // Call API with retry logic
-    const responseText = await retryWithBackoff(() => callGeminiAPI(prompt));
+    if (!results || results.length === 0) {
+      throw new APIError("No results returned from Python service");
+    }
 
-    Logger.debug("Gemini response received", {
-      responseLength: responseText.length,
-    });
-
-    // Parse and normalize response
-    const parsed = parseJsonResponse(responseText);
-    const normalized = normalizeSentimentResult(parsed);
-
+    const result = results[0];
     const duration = Date.now() - startTime;
 
     Logger.info("Sentiment analysis completed", {
       postId: post._id || post.id,
-      sentiment: normalized.sentiment,
-      score: normalized.sentimentScore,
+      sentiment: result.sentiment,
+      score: result.sentimentScore,
       duration,
     });
 
+    // Return result matching expected format
     return {
-      sentiment: normalized.sentiment,
-      sentimentScore: normalized.sentimentScore,
-      sentimentConfidence: normalized.confidence,
-      sentimentAnalyzedAt: new Date(),
-      sentimentSource: "gemini",
-      sentimentExplanation: parsed.explanation || null,
+      sentiment: result.sentiment || 'neutral',
+      sentimentScore: result.sentimentScore || 0.5,
+      sentimentConfidence: result.sentimentConfidence || 0.0,
+      sentimentAnalyzedAt: result.sentimentAnalyzedAt || new Date(),
+      sentimentSource: result.sentimentSource || "keras_bert",
       processingTimeMs: duration,
     };
   } catch (error) {
@@ -542,6 +475,7 @@ export async function analyzePostsSentiment(posts, options = {}) {
   Logger.info("Starting batch sentiment analysis", {
     totalPosts: posts.length,
     concurrency,
+    serviceUrl: CONFIG.serviceUrl,
   });
 
   const results = [];
@@ -549,78 +483,98 @@ export async function analyzePostsSentiment(posts, options = {}) {
   let successful = 0;
   let failed = 0;
 
-  // Process in batches
-  for (let i = 0; i < posts.length; i += concurrency) {
-    const batch = posts.slice(i, i + concurrency);
-    const batchNumber = Math.floor(i / concurrency) + 1;
-    const totalBatches = Math.ceil(posts.length / concurrency);
+  // Process posts in batches via Python service
+  // No rate limiting needed for local model - can process efficiently
+  const batchSize = Math.max(1, Math.min(50, concurrency * 10)); // Process in batches of up to 50
+  
+  for (let i = 0; i < posts.length; i += batchSize) {
+    const batch = posts.slice(i, i + batchSize);
+    const batchNumber = Math.floor(i / batchSize) + 1;
+    const totalBatches = Math.ceil(posts.length / batchSize);
 
-    Logger.debug(`Processing batch ${batchNumber}/${totalBatches}`, {
-      batchSize: batch.length,
-    });
+    Logger.debug(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} posts)`);
 
-    const batchResults = await Promise.allSettled(
-      batch.map(async (post, index) => {
-        const sentimentData = await analyzePostSentiment(post);
-        
-        // Track success/failure
-        if (sentimentData.sentiment) {
+    try {
+      // Call Python service with batch of posts
+      const batchResults = await retryWithBackoff(() => callPythonService(batch));
+
+      // Process results
+      for (let j = 0; j < batch.length; j++) {
+        const post = batch[j];
+        const result = batchResults[j];
+
+        if (result && result.sentiment) {
           successful++;
+          results.push({
+            ...post,
+            sentiment: result.sentiment,
+            sentimentScore: result.sentimentScore,
+            sentimentConfidence: result.sentimentConfidence,
+            sentimentAnalyzedAt: result.sentimentAnalyzedAt || new Date(),
+            sentimentSource: result.sentimentSource || "keras_bert",
+            sentimentError: null,
+            analysis: {
+              ...(post.analysis || {}),
+              sentiment: result.sentiment,
+              sentimentConfidence: result.sentimentConfidence,
+              sentimentSource: result.sentimentSource || "keras_bert",
+            },
+          });
         } else {
           failed++;
           errors.push({
             postId: post._id || post.id,
-            error: sentimentData.error,
-            message: sentimentData.errorMessage,
+            platform: post.platform || 'unknown',
+            keyword: post.keyword || 'unknown',
+            error: result?.error || 'NO_RESULT',
+            message: result?.errorMessage || 'No result from Python service',
+            hasText: !!(post.content?.text || post.content?.title || post.text || post.title),
+            textLength: (post.content?.text || post.content?.title || post.text || post.title || '').length,
+          });
+          // Add post with null sentiment
+          results.push({
+            ...post,
+            sentiment: null,
+            sentimentScore: null,
+            sentimentConfidence: null,
+            sentimentAnalyzedAt: null,
+            sentimentSource: "error",
+            sentimentError: result?.error || 'NO_RESULT',
           });
         }
 
         // Call progress callback if provided
         if (onProgress) {
           onProgress({
-            processed: i + index + 1,
+            processed: i + j + 1,
             total: posts.length,
             successful,
             failed,
           });
         }
-
-        return {
-          ...post,
-          sentiment: sentimentData.sentiment,
-          sentimentScore: sentimentData.sentimentScore,
-          sentimentConfidence: sentimentData.sentimentConfidence,
-          sentimentAnalyzedAt: sentimentData.sentimentAnalyzedAt,
-          sentimentSource: sentimentData.sentimentSource,
-          sentimentExplanation: sentimentData.sentimentExplanation,
-          sentimentError: sentimentData.error || null,
-          analysis: {
-            ...(post.analysis || {}),
-            sentiment: sentimentData.sentiment,
-            sentimentConfidence: sentimentData.sentimentConfidence,
-            sentimentSource: sentimentData.sentimentSource,
-            sentimentExplanation: sentimentData.sentimentExplanation,
-            processingTimeMs: sentimentData.processingTimeMs,
-          },
-        };
-      })
-    );
-
-    // Extract results from settled promises
-    const batchProcessed = batchResults.map((result) => {
-      if (result.status === "fulfilled") {
-        return result.value;
-      } else {
-        Logger.error("Batch processing error", result.reason);
-        return null;
       }
-    }).filter(Boolean);
-
-    results.push(...batchProcessed);
-
-    // Add a small delay between batches to avoid rate limiting
-    if (i + concurrency < posts.length) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    } catch (error) {
+      Logger.error(`Batch ${batchNumber} processing error`, error);
+      // Mark all posts in this batch as failed
+      for (const post of batch) {
+        failed++;
+        errors.push({
+          postId: post._id || post.id,
+          platform: post.platform || 'unknown',
+          keyword: post.keyword || 'unknown',
+          error: error.code || 'BATCH_ERROR',
+          message: error.message,
+        });
+        results.push({
+          ...post,
+          sentiment: null,
+          sentimentScore: null,
+          sentimentConfidence: null,
+          sentimentAnalyzedAt: null,
+          sentimentSource: "error",
+          sentimentError: error.code || 'BATCH_ERROR',
+        });
+      }
     }
   }
 
@@ -646,13 +600,13 @@ export async function analyzePostsSentiment(posts, options = {}) {
 // ============================================================================
 
 /**
- * Validate API configuration
+ * Validate service configuration
  * @returns {boolean} - True if configuration is valid
  */
 export function validateConfiguration() {
   try {
-    if (!CONFIG.apiKey) {
-      throw new ConfigurationError("GEMINI_API_KEY is not set");
+    if (!CONFIG.serviceUrl) {
+      throw new ConfigurationError("SENTIMENT_SERVICE_URL is not set");
     }
     return true;
   } catch (error) {
@@ -667,18 +621,26 @@ export function validateConfiguration() {
  */
 export function getConfiguration() {
   return {
-    model: CONFIG.model,
+    serviceUrl: CONFIG.serviceUrl,
     defaultConcurrency: CONFIG.defaultConcurrency,
     maxRetries: CONFIG.maxRetries,
     retryDelayMs: CONFIG.retryDelayMs,
-    hasApiKey: !!CONFIG.apiKey,
+    hasServiceUrl: !!CONFIG.serviceUrl,
   };
 }
 
 /**
- * Reset the Gemini client (useful for testing)
+ * Check if Python service is available
+ * @returns {Promise<boolean>} - True if service is healthy
  */
-export function resetClient() {
-  geminiManager.reset();
-  Logger.info("Gemini client reset");
+export async function checkServiceHealth() {
+  try {
+    const response = await axios.get(`${CONFIG.serviceUrl}/health`, {
+      timeout: 5000,
+    });
+    return response.data?.status === "healthy";
+  } catch (error) {
+    Logger.warn("Python service health check failed", { error: error.message });
+    return false;
+  }
 }

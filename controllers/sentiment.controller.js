@@ -231,7 +231,18 @@ export const analyzeSentiment = async (req, res) => {
       });
     }
 
-    const analyzedPosts = await analyzePostsSentiment(posts, 5);
+    // No rate limit needed for local model - can process larger batches
+    // Still enforce a reasonable limit to prevent timeouts
+    const MAX_POSTS_PER_REQUEST = 100;
+    if (posts.length > MAX_POSTS_PER_REQUEST) {
+      return res.status(400).json({
+        success: false,
+        message: `Too many posts for synchronous analysis. Maximum limit is ${MAX_POSTS_PER_REQUEST} posts per request.`,
+      });
+    }
+
+    const analysisResult = await analyzePostsSentiment(posts, { concurrency: 10 });
+    const analyzedPosts = analysisResult.results || analysisResult || [];
     let diagnostics = null;
 
     if (includeDiagnostics) {
@@ -329,7 +340,7 @@ export const batchAnalyzeSentiment = async (req, res) => {
       brandName,
       platform,
       limit = 100,
-      batchSize = 10,
+      batchSize = 5,
       includeDiagnostics = false,
       diagnosticsTag = "batch-run",
       diagnosticsSampleLimit,
@@ -359,6 +370,17 @@ export const batchAnalyzeSentiment = async (req, res) => {
 
     const postsToAnalyze = await SocialPost.find(filter)
       .limit(Number(limit))
+      .select({
+        _id: 1,
+        platform: 1,
+        keyword: 1,
+        brand: 1,
+        brandName: 1,
+        content: 1,
+        text: 1,
+        title: 1,
+        summary: 1,
+      })
       .lean();
 
     if (postsToAnalyze.length === 0) {
@@ -381,7 +403,23 @@ export const batchAnalyzeSentiment = async (req, res) => {
       : null;
 
     for (let i = 0; i < postsToAnalyze.length; i += batchSize) {
-      const batch = postsToAnalyze.slice(i, i + batchSize);
+      const batch = postsToAnalyze.slice(i, i + batchSize).map((post) => {
+        const baseText =
+          post?.content?.text ||
+          post?.content?.description ||
+          post?.text ||
+          post?.summary ||
+          "";
+
+        return {
+          ...post,
+          content: {
+            text: baseText,
+            description: post?.content?.description || null,
+            title: post?.content?.title || post?.title || "",
+          },
+        };
+      });
 
       try {
         const analyzedBatch = await analyzePostsSentiment(batch, 5);
@@ -415,8 +453,7 @@ export const batchAnalyzeSentiment = async (req, res) => {
         }
 
         console.log(
-          `Processed batch ${Math.floor(i / batchSize) + 1}: ${
-            analyzedBatch.length
+          `Processed batch ${Math.floor(i / batchSize) + 1}: ${analyzedBatch.length
           } posts analyzed`
         );
       } catch (batchError) {
@@ -675,8 +712,8 @@ export const getSentimentSummary = async (req, res) => {
       const key = ["positive", "neutral", "negative"].includes(entry?._id)
         ? entry._id
         : entry?._id === "pending"
-        ? "pending"
-        : "neutral";
+          ? "pending"
+          : "neutral";
       sentiment[key] = entry?.count || 0;
     });
 
