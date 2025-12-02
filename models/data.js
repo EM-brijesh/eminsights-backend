@@ -13,7 +13,7 @@ const socialPostSchema = new mongoose.Schema(
 
     platform: {
       type: String,
-      enum: ["twitter", "youtube", "reddit" , "google"],
+      enum: ["twitter", "youtube", "reddit", "google"],
       required: true,
     },
 
@@ -81,7 +81,7 @@ socialPostSchema.index({ keyword: 1 });
 socialPostSchema.index({ platform: 1 });
 socialPostSchema.index({ createdAt: -1 });
 socialPostSchema.index({ brand: 1, keyword: 1, platform: 1, createdAt: -1 });
-socialPostSchema.index({ sentiment: 1 });
+
 socialPostSchema.index({ sentimentAnalyzedAt: -1 });
 
 export const SocialPost = mongoose.model("SocialPost", socialPostSchema);
