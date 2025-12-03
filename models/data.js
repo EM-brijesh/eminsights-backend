@@ -82,6 +82,8 @@ socialPostSchema.index({ platform: 1 });
 socialPostSchema.index({ createdAt: -1 });
 socialPostSchema.index({ brand: 1, keyword: 1, platform: 1, createdAt: -1 });
 
+socialPostSchema.index({ sourceUrl: 1, platform: 1 }, { unique: true, sparse: true });
+
 socialPostSchema.index({ sentimentAnalyzedAt: -1 });
 
 export const SocialPost = mongoose.model("SocialPost", socialPostSchema);

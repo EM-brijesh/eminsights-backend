@@ -724,21 +724,51 @@ export const runKeywordGroupSearch = async (req, res) => {
       failedCount = totalScraped - analyzedCount;
     }
 
-    // Save posts with sentiment already included
+    // Save posts with sentiment already included - with duplicate handling
     let savedCount = 0;
+    let duplicateCount = 0;
+
     if (analyzedPosts.length > 0) {
       try {
-        await SocialPost.insertMany(analyzedPosts, { ordered: false });
-        savedCount = analyzedPosts.length;
+        const result = await SocialPost.insertMany(analyzedPosts, { 
+          ordered: false,
+          rawResult: true 
+        });
+        savedCount = result.insertedCount || analyzedPosts.length;
       } catch (saveError) {
-        console.error("Error saving posts:", saveError);
-        // Try to save posts individually if batch fails
-        for (const post of analyzedPosts) {
-          try {
-            await SocialPost.create(post);
-            savedCount++;
-          } catch (err) {
-            console.error("Failed to save individual post:", err.message);
+        // Handle duplicate key errors (E11000)
+        if (saveError.code === 11000 || saveError.name === 'MongoBulkWriteError') {
+          // Count successful inserts
+          if (saveError.result && saveError.result.nInserted) {
+            savedCount = saveError.result.nInserted;
+          } else if (saveError.insertedDocs) {
+            savedCount = saveError.insertedDocs.length;
+          }
+          
+          // Count duplicates from writeErrors
+          if (saveError.writeErrors) {
+            duplicateCount = saveError.writeErrors.filter(
+              err => err.code === 11000
+            ).length;
+          }
+          
+          console.log(`Successfully saved ${savedCount} posts, skipped ${duplicateCount} duplicates`);
+        } else {
+          console.error("Error saving posts:", saveError);
+          
+          // Fallback to individual saves for other errors
+          for (const post of analyzedPosts) {
+            try {
+              await SocialPost.create(post);
+              savedCount++;
+            } catch (err) {
+              if (err.code === 11000) {
+                duplicateCount++;
+                console.log(`Duplicate post skipped: ${post.sourceUrl}`);
+              } else {
+                console.error("Failed to save individual post:", err.message);
+              }
+            }
           }
         }
       }
@@ -757,6 +787,8 @@ export const runKeywordGroupSearch = async (req, res) => {
         failed: failedCount,
       },
       saved: savedCount,
+      duplicates: duplicateCount,
+      totalAttempted: analyzedPosts.length,
     });
   } catch (err) {
     console.error("Group Search Run Error:", err);
