@@ -94,7 +94,7 @@ app.get('/auth/meta/callback', async (req, res) => {
     maxAge: 24 * 60 * 60 * 1000
   });
 
-  res.redirect("http://localhost:3000/settings/channel-config");
+  res.redirect("http:eminsights.in/settings/channel-config");
 });
 
 
