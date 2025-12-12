@@ -21,7 +21,8 @@ const allowedOriginList = process.env.ALLOWED_ORIGINS
 : [
     "http://localhost:3000",
     "http://eminsights.in",
-    "https://eminsights.in"
+    "https://eminsights.in",
+    "https://eminsights-frontend-git-vercel-re-ade9ae-brijesh-koris-projects.vercel.app"
   ];
 
 const corsOptions = {
