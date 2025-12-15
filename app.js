@@ -22,7 +22,7 @@ const allowedOriginList = process.env.ALLOWED_ORIGINS
     "http://localhost:3000",
     "http://eminsights.in",
     "https://eminsights.in",
-    "https://eminsights-frontend-git-vercel-re-ade9ae-brijesh-koris-projects.vercel.app"
+    "https://eminsights-frontend.vercel.app"
   ];
 
 const corsOptions = {
@@ -95,7 +95,7 @@ app.get('/auth/meta/callback', async (req, res) => {
     maxAge: 24 * 60 * 60 * 1000
   });
 
-  res.redirect("http:eminsights.in/settings/channel-config");
+  res.redirect("https://eminsights-frontend.vercel.app/settings/channel-config");
 });
 
 
