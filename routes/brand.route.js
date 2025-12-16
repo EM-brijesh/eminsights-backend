@@ -1,4 +1,5 @@
 import express from "express";
+import multer from "multer";
 import {
   createBrand,
   configureBrand,
@@ -16,6 +17,15 @@ import { deletFromEminsights, mailPost } from "../controllers/dashboard.controll
 
 const router = express.Router();
 
+// In‑memory upload for email attachments (supports any file type)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25 MB per file
+    files: 10, // up to 10 attachments per email
+  },
+});
+
 router.post("/create", protect, isAdmin, createBrand);
 router.get("/all", protect, isAdmin, getBrands);
 router.post("/assign-users", protect, isAdmin, assignUsersToBrand);
@@ -24,12 +34,13 @@ router.post("/delete", protect, isAdmin, deleteBrand);
 router.post("/configure", protect, canManageBrand, configureBrand);
 
 router.get("/user/:email", protect, getBrandsByUser);
-router.post("/add-keywordgrp" , protect , addKeywordGroup)
+router.post("/add-keywordgrp", protect, addKeywordGroup);
 router.get("/assigned/:email", protect, getAssignedBrands);
 
-router.put("/keywordconfig" , protect , updateKeywordGroupByName)
+router.put("/keywordconfig", protect, updateKeywordGroupByName);
 
-router.post("/send" , mailPost)
+// Email sending with attachment support (any file type)
+router.post("/send", upload.array("attachments"), mailPost);
 
 router.delete("/delete/:postId", deletFromEminsights);
 
