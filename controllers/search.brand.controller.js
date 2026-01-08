@@ -7,12 +7,14 @@ import { fetchRedditSearch } from "../services/reddit.service.js";
 import { scheduleKeywordGroup } from "../utils/cronManager.js";
 import { fetchGoogleSearch } from "../services/google.service.js";
 import { analyzePostsSentiment } from "../services/sentiment.service.js";
+import { fetchInstagramSearch } from "../services/instagramFetcher.js";
 
 const REALTIME_PLATFORM_FETCHERS = {
   youtube: fetchYouTubeSearch,
   twitter: fetchTwitterSearch,
   reddit: fetchRedditSearch,
   google: fetchGoogleSearch,
+  instagram: fetchInstagramSearch,
 };
 
 const SUPPORTED_REALTIME_PLATFORMS = Object.keys(REALTIME_PLATFORM_FETCHERS);
@@ -248,6 +250,12 @@ export const runSearchForBrand = async (req, res) => {
             exclude: excludeKeywords,
           });
         }
+        else if (platform === "instagram") {
+          fetchedData = await fetchInstagramSearch(keyword, {
+            include: includeKeywords,
+            exclude: excludeKeywords,
+          });
+        }
 
         results[platform].push(...fetchedData);
 
@@ -308,6 +316,7 @@ export const runSearchForBrand = async (req, res) => {
         twitter: results.twitter?.length || 0,
         reddit: results.reddit?.length || 0,
         google: results.google?.length || 0,
+        instagram: results.instagram?.length || 0,
       },
       sentimentAnalysis: {
         totalScraped,
@@ -625,13 +634,11 @@ export const runKeywordGroupSearch = async (req, res) => {
       return res.status(400).json({ success: false, message: "groupName is required" });
     }
 
-    // Fetch brand
     const brand = await Brand.findOne({ brandName });
     if (!brand) {
       return res.status(404).json({ success: false, message: "Brand not found" });
     }
 
-    // Get specific Keyword Group
     const group = brand.keywordGroups.find(
       (g) => g.groupName.toLowerCase() === groupName.toLowerCase()
     );
@@ -643,7 +650,6 @@ export const runKeywordGroupSearch = async (req, res) => {
       });
     }
 
-    // If group is paused → do not run
     if (group.status === "paused" || group.paused === true) {
       return res.status(400).json({
         success: false,
@@ -651,9 +657,17 @@ export const runKeywordGroupSearch = async (req, res) => {
       });
     }
 
-    // Time window
+    // 🔍 LOG: Group platforms
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("🔍 KEYWORD GROUP SEARCH DEBUG");
+    console.log("Brand:", brand.brandName);
+    console.log("Group:", group.groupName);
+    console.log("Platforms in group:", group.platforms);
+    console.log("Keywords:", group.keywords);
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
     const now = new Date();
-    const startDate = new Date(now.getTime() - 60 * 60 * 1000); // last 1 hour
+    const startDate = new Date(now.getTime() - 60 * 60 * 1000);
     const endDate = new Date(now.getTime() - 10 * 1000);
 
     const summary = SUPPORTED_REALTIME_PLATFORMS.reduce(
@@ -665,14 +679,28 @@ export const runKeywordGroupSearch = async (req, res) => {
 
     // Loop platforms
     for (const platform of group.platforms) {
+      console.log(`\n📱 Processing platform: ${platform}`);
+      
       const fetcher = REALTIME_PLATFORM_FETCHERS[platform];
-      if (!fetcher) continue;
+      
+      // 🔍 LOG: Check if fetcher exists
+      if (!fetcher) {
+        console.log(`❌ No fetcher found for platform: ${platform}`);
+        continue;
+      }
+      
+      console.log(`✅ Fetcher found for ${platform}`);
 
       // Loop keywords
       for (const keyword of group.keywords) {
+        console.log(`\n  🔑 Keyword: "${keyword}" on ${platform}`);
+        
         let fetchedData = [];
 
         try {
+          // 🔍 LOG: Before fetch
+          console.log(`  ⏳ Calling fetcher for ${platform}...`);
+          
           fetchedData = await fetcher(keyword, {
             include: group.includeKeywords,
             exclude: group.excludeKeywords,
@@ -680,13 +708,20 @@ export const runKeywordGroupSearch = async (req, res) => {
             country: group.country,
             startDate,
             endDate,
+            brand,
+            group
           });
+          
+          // 🔍 LOG: After fetch
+          console.log(`  ✅ Fetched ${fetchedData.length} posts from ${platform}`);
+          
         } catch (fetchErr) {
-          console.error(`Group Fetch Error [${platform}]`, {
+          console.error(`  ❌ Group Fetch Error [${platform}]`, {
             brand: brand.brandName,
             group: group.groupName,
             keyword,
             error: fetchErr.message,
+            stack: fetchErr.stack
           });
           continue;
         }
@@ -711,6 +746,12 @@ export const runKeywordGroupSearch = async (req, res) => {
       }
     }
 
+    console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("📊 FETCH SUMMARY:");
+    console.log(JSON.stringify(summary, null, 2));
+    console.log("Total posts to insert:", postsToInsert.length);
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
     // Analyze ALL posts with sentiment before saving
     let analyzedPosts = postsToInsert;
     let analyzedCount = 0;
@@ -719,12 +760,11 @@ export const runKeywordGroupSearch = async (req, res) => {
 
     if (postsToInsert.length > 0) {
       analyzedPosts = await analyzePostsBeforeSave(postsToInsert);
-      // Count how many got sentiment
       analyzedCount = analyzedPosts.filter(p => p.sentiment).length;
       failedCount = totalScraped - analyzedCount;
     }
 
-    // Save posts with sentiment already included - with duplicate handling
+    // Save posts with sentiment already included
     let savedCount = 0;
     let duplicateCount = 0;
 
@@ -736,16 +776,13 @@ export const runKeywordGroupSearch = async (req, res) => {
         });
         savedCount = result.insertedCount || analyzedPosts.length;
       } catch (saveError) {
-        // Handle duplicate key errors (E11000)
         if (saveError.code === 11000 || saveError.name === 'MongoBulkWriteError') {
-          // Count successful inserts
           if (saveError.result && saveError.result.nInserted) {
             savedCount = saveError.result.nInserted;
           } else if (saveError.insertedDocs) {
             savedCount = saveError.insertedDocs.length;
           }
           
-          // Count duplicates from writeErrors
           if (saveError.writeErrors) {
             duplicateCount = saveError.writeErrors.filter(
               err => err.code === 11000
@@ -756,7 +793,6 @@ export const runKeywordGroupSearch = async (req, res) => {
         } else {
           console.error("Error saving posts:", saveError);
           
-          // Fallback to individual saves for other errors
           for (const post of analyzedPosts) {
             try {
               await SocialPost.create(post);

@@ -10,6 +10,7 @@ import usersRoutes from "./routes/users.route.js";
 import sentimentRoutes from "./routes/sentiment.route.js";
 import { protect } from "./middleware/auth.js";
 import cookieParser from "cookie-parser";
+import metaRoutes from "./routes/meta.routes.js";
 
 const app = express();
 
@@ -62,108 +63,113 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/data", protect, dataRoutes);
 app.use("/api/sentiment", protect, sentimentRoutes);
+app.use("/meta", metaRoutes);
 
 // Health check route
 app.get("/health", (req, res) => {
   res.json({ success: true, message: "✅ Server is running" });
 });
 // META ROUTES 
-app.get('/auth/meta/login', (req, res) => {
-  const fbLoginUrl = `https://www.facebook.com/v21.0/dialog/oauth?client_id=${process.env.META_APP_ID}&redirect_uri=${process.env.META_REDIRECT_URI}&scope=pages_show_list,pages_read_engagement,instagram_basic`;
-  res.redirect(fbLoginUrl);
-});
+// app.get('/auth/meta/login', (req, res) => {
+//   const fbLoginUrl = `https://www.facebook.com/v21.0/dialog/oauth?client_id=${process.env.META_APP_ID}&redirect_uri=${process.env.META_REDIRECT_URI}&scope=pages_show_list,pages_read_engagement,instagram_basic`;
+//   res.redirect(fbLoginUrl);
+// });
 
-app.get('/auth/meta/callback', async (req, res) => {
-  const { code } = req.query;
+// app.get('/auth/meta/callback', async (req, res) => {
+//   const { code } = req.query;
 
-  const tokenUrl = `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${process.env.META_APP_ID}&redirect_uri=${process.env.META_REDIRECT_URI}&client_secret=${process.env.META_APP_SECRET}&code=${code}`;
+//   const tokenUrl = `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${process.env.META_APP_ID}&redirect_uri=${process.env.META_REDIRECT_URI}&client_secret=${process.env.META_APP_SECRET}&code=${code}`;
 
-  const response = await fetch(tokenUrl);
-  const data = await response.json();
+//   const response = await fetch(tokenUrl);
+//   const data = await response.json();
 
-  console.log("Meta returned token:", data);
+//   console.log("Meta returned token:", data);
 
-  if (data.error) {
-    console.error("OAuth Error:", data.error);
-    return res.status(400).send("Meta OAuth failed: " + data.error.message);
-  }
+//   if (data.error) {
+//     console.error("OAuth Error:", data.error);
+//     return res.status(400).send("Meta OAuth failed: " + data.error.message);
+//   }
 
-  res.cookie("fb_user_token", data.access_token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: false,
-    maxAge: 24 * 60 * 60 * 1000
-  });
+//   res.cookie("fb_user_token", data.access_token, {
+//     httpOnly: true,
+//     sameSite: "lax",
+//     secure: false,
+//     maxAge: 24 * 60 * 60 * 1000
+//   });
 
-  res.redirect("https://eminsights-frontend.vercel.app/settings/channel-config");
-});
-
-
+//   res.redirect("http://localhost:3000/settings/channel-config");
+// });
 
 
-app.get("/api/pages", async (req, res) => {
-  console.log("Cookies received:", req.cookies);
-
-  const token = req.cookies.fb_user_token;
-  if (!token) return res.status(401).json({ error: "No token. Login first." });
-
-  const url = `https://graph.facebook.com/v21.0/me/accounts?access_token=${token}`;
-  const resp = await fetch(url);
-  const data = await resp.json();
-
-  return res.json(data);
-});
-
-app.get("/api/ig-account", async (req, res) => {
-  const { pageId, pageToken } = req.query;
-
-  if (!pageId || !pageToken) {
-    return res.status(400).json({ error: "Missing pageId or pageToken" });
-  }
-
-  const url = `https://graph.facebook.com/v21.0/${pageId}?fields=connected_instagram_account&access_token=${pageToken}`;
-
-  try {
-    const response = await fetch(url);
-    const data = await response.json();
-
-    return res.json(data);
-  } catch (error) {
-    return res.status(500).json({ error: "Failed to fetch IG account" });
-  }
-});
 
 
-app.get('/api/mock-hashtag-search', (req, res) => {
-  const mock = {
-    hashtag: req.query.hashtag,
-    results: [
-      {
-        id: "1",
-        media_url: "https://via.placeholder.com/300",
-        caption: "Mock fitness post 💪",
-        username: "fit_user_1"
-      },
-      {
-        id: "2",
-        media_url: "https://via.placeholder.com/300",
-        caption: "Another workout mock!",
-        username: "gymlover"
-      }
-    ]
-  };
-  res.json(mock);
-});
+// app.get("/api/pages", async (req, res) => {
+//   const token = req.cookies.fb_user_token;
+//   if (!token) return res.status(401).json({ error: "Login required" });
 
-app.get('/api/mock-insights', (req, res) => {
-  res.json({
-    likes: 1240,
-    comments: 89,
-    saves: 52,
-    reach: 14500,
-    engagement_rate: 6.4
-  });
-});
+//   const url = `https://graph.facebook.com/v21.0/me/accounts?access_token=${token}`;
+//   const resp = await fetch(url);
+//   const data = await resp.json();
+
+//   // Example: user selects one page on frontend
+//   res.json(data);
+// });
+
+
+// app.post("/api/ig-account", async (req, res) => {
+//   const { pageId, pageToken, userId } = req.body;
+
+//   const url = `https://graph.facebook.com/v21.0/${pageId}?fields=connected_instagram_account&access_token=${pageToken}`;
+
+//   const response = await fetch(url);
+//   const data = await response.json();
+
+//   if (!data.connected_instagram_account) {
+//     return res.status(400).json({ error: "No IG business account connected" });
+//   }
+
+//   await MetaAccount.create({
+//     userId,
+//     pageId,
+//     pageAccessToken: pageToken,
+//     instagramBusinessId: data.connected_instagram_account.id
+//   });
+
+//   res.json({ success: true });
+// });
+
+
+
+// app.get('/api/mock-hashtag-search', (req, res) => {
+//   const mock = {
+//     hashtag: req.query.hashtag,
+//     results: [
+//       {
+//         id: "1",
+//         media_url: "https://via.placeholder.com/300",
+//         caption: "Mock fitness post 💪",
+//         username: "fit_user_1"
+//       },
+//       {
+//         id: "2",
+//         media_url: "https://via.placeholder.com/300",
+//         caption: "Another workout mock!",
+//         username: "gymlover"
+//       }
+//     ]
+//   };
+//   res.json(mock);
+// });
+
+// app.get('/api/mock-insights', (req, res) => {
+//   res.json({
+//     likes: 1240,
+//     comments: 89,
+//     saves: 52,
+//     reach: 14500,
+//     engagement_rate: 6.4
+//   });
+// });
 
 
 
