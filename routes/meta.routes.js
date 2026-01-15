@@ -81,27 +81,17 @@ router.post("/pages", async (req, res) => {
 router.post("/connect", async (req, res) => {
   try {
     const {
-      userId,
-      brandId, // 🆕 ADD THIS
       pageId,
       pageName,
-      pageAccessToken
+      pageAccessToken,
+      accountLabel, // Optional friendly name
+      connectedBy // Optional: userId who connected it
     } = req.body;
 
-    if (!userId || !pageId || !pageAccessToken) {
+    if (!pageId || !pageAccessToken) {
       return res.status(400).json({
-        error: "userId, pageId and pageAccessToken are required"
+        error: "pageId and pageAccessToken are required"
       });
-    }
-
-    // 🆕 Validate brand exists if provided
-    if (brandId) {
-      const brand = await Brand.findById(brandId);
-      if (!brand) {
-        return res.status(404).json({
-          error: "Brand not found"
-        });
-      }
     }
 
     // Fetch IG Business Account ID
@@ -116,30 +106,35 @@ router.post("/connect", async (req, res) => {
       });
     }
 
-    // Save or update Meta account
+    // ✅ Save or update - independent of user/brand
     const metaAccount = await MetaAccount.findOneAndUpdate(
-      { userId, brand: brandId }, // 🆕 Query by both userId and brand
+      { pageId }, // Unique by pageId
       {
-        userId,
-        brand: brandId, // 🆕 Save brand reference
         pageId,
         pageName,
         pageAccessToken,
-        instagramBusinessId
+        instagramBusinessId,
+        accountLabel: accountLabel || pageName || "Instagram Account",
+        connectedBy: connectedBy || null,
+        isActive: true,
+        connectedAt: new Date()
       },
       { upsert: true, new: true }
     );
 
-    console.log("✅ MetaAccount connected");
-    console.log("User ID:", userId);
-    console.log("Brand ID:", brandId);
+    console.log("✅ MetaAccount connected (global)");
+    console.log("Page:", metaAccount.pageName);
     console.log("Instagram Business ID:", instagramBusinessId);
+    console.log("This account can now be used for ALL brands");
 
     res.json({ 
       success: true,
+      message: "Instagram account connected successfully",
       data: {
+        id: metaAccount._id,
         pageId: metaAccount.pageId,
         pageName: metaAccount.pageName,
+        accountLabel: metaAccount.accountLabel,
         instagramBusinessId: metaAccount.instagramBusinessId
       }
     });
@@ -148,6 +143,19 @@ router.post("/connect", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+//show connected account 
+
+router.get("/connected-accounts" , async (req, res) => {
+  try {
+    const account = await MetaAccount.find({ isActive: true });
+    res.json({ success: true, accounts: account });
+  }
+  catch (err) {
+    console.error("Fetch Connected Accounts Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+})
 
 
 export default router;

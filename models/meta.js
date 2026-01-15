@@ -1,48 +1,15 @@
 import mongoose from "mongoose";
 
-const MetaAccountSchema = new mongoose.Schema(
-  {
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true
-    },
+const MetaAccountSchema = new mongoose.Schema({
+  pageId: { type: String, required: true, unique: true },
+  pageName: { type: String },
+  pageAccessToken: { type: String, required: true },
+  instagramBusinessId: { type: String, required: true },
+  isActive: { type: Boolean, default: true },
+  connectedAt: { type: Date, default: Date.now }
+}, { timestamps: true });
 
-    // 🆕 ADD THIS: Link to brand
-    brand: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Brand"
-    },
-
-    pageId: {
-      type: String,
-      required: true
-    },
-
-    pageName: {
-      type: String
-    },
-
-    pageAccessToken: {
-      type: String,
-      required: true
-    },
-
-    instagramBusinessId: {
-      type: String,
-      required: true
-    },
-
-    connectedAt: {
-      type: Date,
-      default: Date.now
-    }
-  },
-  { timestamps: true }
-);
-
-// 🆕 ADD INDEX for faster lookups
-MetaAccountSchema.index({ brand: 1 });
+// Index for faster lookups
 MetaAccountSchema.index({ userId: 1 });
 
 export default mongoose.model("MetaAccount", MetaAccountSchema);
