@@ -411,7 +411,7 @@ export async function analyzePostSentiment(post) {
       sentimentScore: result.sentimentScore || 0.5,
       sentimentConfidence: result.sentimentConfidence || 0.0,
       sentimentAnalyzedAt: result.sentimentAnalyzedAt || new Date(),
-      sentimentSource: result.sentimentSource || "keras_bert",
+      sentimentSource: result.sentimentSource || "llm",
       processingTimeMs: duration,
     };
   } catch (error) {
@@ -511,13 +511,13 @@ export async function analyzePostsSentiment(posts, options = {}) {
             sentimentScore: result.sentimentScore,
             sentimentConfidence: result.sentimentConfidence,
             sentimentAnalyzedAt: result.sentimentAnalyzedAt || new Date(),
-            sentimentSource: result.sentimentSource || "keras_bert",
+            sentimentSource: result.sentimentSource || "llm",
             sentimentError: null,
             analysis: {
               ...(post.analysis || {}),
               sentiment: result.sentiment,
               sentimentConfidence: result.sentimentConfidence,
-              sentimentSource: result.sentimentSource || "keras_bert",
+              sentimentSource: result.sentimentSource || "llm",
             },
           });
         } else {

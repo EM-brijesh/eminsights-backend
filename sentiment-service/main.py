@@ -1,5 +1,6 @@
 """
-FastAPI service for sentiment analysis using VADER
+FastAPI service for sentiment analysis using LLM APIs
+Supports OpenAI, Anthropic, Google Gemini, and other providers
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +18,25 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Load .env from sentiment-service directory
+    env_path = Path(__file__).parent / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
+        logger.info(f"✅ Loaded .env file from: {env_path}")
+    else:
+        # Try loading from parent directory (backend root)
+        parent_env = Path(__file__).parent.parent / '.env'
+        if parent_env.exists():
+            load_dotenv(parent_env)
+            logger.info(f"✅ Loaded .env file from: {parent_env}")
+        else:
+            logger.warning("⚠️  No .env file found. Using system environment variables.")
+except ImportError:
+    logger.warning("⚠️  python-dotenv not installed. Install it to load .env files: pip install python-dotenv")
 
 # Initialize FastAPI app
 app = FastAPI(title="Sentiment Analysis API", version="1.0.0")
@@ -64,7 +84,7 @@ class SentimentResult(BaseModel):
     sentimentScore: float
     sentimentConfidence: float
     sentimentAnalyzedAt: str
-    sentimentSource: str = "vader"
+    sentimentSource: str = "llm"
 
 class AnalyzeResponse(BaseModel):
     results: List[SentimentResult]
@@ -94,30 +114,53 @@ def extract_text_from_post(post: Dict) -> str:
 
 @app.on_event("startup")
 async def startup_event():
-    """Load model on startup"""
+    """Load LLM model on startup"""
     global model_loader
     
     try:
-        logger.info("🚀 Initializing VADER sentiment analyzer...")
-        logger.info("   Optimized for social media text")
+        logger.info("🚀 Initializing LLM-based sentiment analyzer...")
         
         model_loader = SentimentModelLoader()
         model_loader.load_model()
         
-        logger.info("✅ VADER loaded successfully!")
+        logger.info("✅ LLM sentiment analyzer loaded successfully!")
+        logger.info(f"   Provider: {model_loader.provider}")
+        logger.info(f"   Model: {model_loader.model_name}")
         
     except Exception as e:
-        logger.error(f"❌ Failed to load model: {e}", exc_info=True)
+        logger.error(f"❌ Failed to load LLM model: {e}", exc_info=True)
+        logger.error("   Make sure LLM_API_KEY and LLM_MODEL_NAME are set")
         raise
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up resources on shutdown"""
+    global model_loader
+    if model_loader:
+        try:
+            await model_loader.close()
+            logger.info("✅ LLM client closed")
+        except Exception as e:
+            logger.warning(f"Error closing LLM client: {e}")
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {
+    health_status = {
         "status": "healthy" if model_loader and model_loader.is_loaded else "not_ready",
         "model_loaded": model_loader.is_loaded if model_loader else False,
-        "model_type": "vader"
+        "model_type": "llm"
     }
+    
+    if model_loader and model_loader.is_loaded:
+        health_status["provider"] = model_loader.provider
+        health_status["model_name"] = model_loader.model_name
+        # Check if API key is configured (without exposing it)
+        health_status["api_configured"] = bool(model_loader.api_key)
+    else:
+        health_status["api_configured"] = False
+    
+    return health_status
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_sentiment(request: AnalyzeRequest):
@@ -169,14 +212,24 @@ async def analyze_sentiment(request: AnalyzeRequest):
             
             post_metadata.append(post_dict)
         
-        # Get predictions from VADER
-        logger.info("🤖 Running VADER analysis...")
+        # Get predictions from LLM
+        logger.info(f"🤖 Running LLM analysis using {model_loader.provider.upper()} ({model_loader.model_name})...")
         predictions = model_loader.predict_sentiment(texts)
         logger.info(f"✅ Got {len(predictions)} predictions")
         
-        # Log results
+        # Log detailed results (scores shown in console but NOT sent to frontend UI)
+        logger.info("=" * 80)
+        logger.info("📊 SENTIMENT ANALYSIS RESULTS (Console Only - Not Shown to Users)")
+        logger.info("=" * 80)
         for i, pred in enumerate(predictions):
-            logger.info(f"   Post {i+1}: {pred['sentiment'].upper()} (score: {pred['sentimentScore']:.3f})")
+            text_preview = texts[i][:60] + "..." if len(texts[i]) > 60 else texts[i]
+            logger.info(f"   Post {i+1}:")
+            logger.info(f"      Text: '{text_preview}'")
+            logger.info(f"      Sentiment: {pred['sentiment'].upper()}")
+            logger.info(f"      Score: {pred['sentimentScore']:.3f} (0=negative, 0.5=neutral, 1=positive)")
+            logger.info(f"      Confidence: {pred['sentimentConfidence']:.3f}")
+            logger.info("-" * 80)
+        logger.info("=" * 80)
         
         # Build results
         results = []
@@ -191,7 +244,9 @@ async def analyze_sentiment(request: AnalyzeRequest):
             result['sentimentScore'] = prediction['sentimentScore']
             result['sentimentConfidence'] = prediction['sentimentConfidence']
             result['sentimentAnalyzedAt'] = analyzed_at
-            result['sentimentSource'] = 'vader'
+            # Set sentiment source based on provider
+            provider_name = model_loader.provider if model_loader else "llm"
+            result['sentimentSource'] = f'llm_{provider_name}'
             
             # Ensure _id or id is present
             if not result.get('_id') and not result.get('id'):
