@@ -103,16 +103,19 @@ class SentimentModelLoader:
             logger.info(f"API Base: {self.api_base}")
             
             # Create HTTP client with connection pooling and optimized limits
+            # Note: HTTP/2 disabled for Python 3.13 compatibility
             limits = httpx.Limits(
                 max_connections=self.MAX_CONNECTIONS,
-                max_keepalive_connections=self.MAX_KEEPALIVE
+                max_keepalive_connections=self.MAX_KEEPALIVE,
+                keepalive_expiry=30.0  # Close idle connections after 30s
             )
             
             self.client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.DEFAULT_TIMEOUT, connect=10.0),
                 limits=limits,
                 headers={"Content-Type": "application/json"},
-                http2=True,  # Enable HTTP/2 for better performance
+                http2=False,  # Disabled for Python 3.13 compatibility
+                follow_redirects=True,
             )
             
             self.is_loaded = True
