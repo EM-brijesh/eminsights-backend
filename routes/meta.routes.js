@@ -4,6 +4,7 @@ import {
   fetchUserPages,
   fetchInstagramBusinessAccount
 } from "../services/meta.service.js";
+import { fetchFacebookPagePosts } from "../services/facebook_fetcher.js";
 import MetaAccount from "../models/meta.js";
 
 const router = express.Router();
@@ -156,6 +157,34 @@ router.get("/connected-accounts" , async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 })
+
+router.post("/page-posts", async (req, res) => {
+  try {
+    const { keyword, limit = 10, brand } = req.body;
+
+    console.log("\n📘 Page posts route called");
+    console.log("  Keyword:", keyword);
+    console.log("  Limit:", limit);
+
+    const posts = await fetchFacebookPagePosts(keyword, {
+      brand,
+      limit
+    });
+
+    res.json({
+      success: true,
+      count: posts.length,
+      posts
+    });
+
+  } catch (err) {
+    console.error("Fetch Page Posts Route Error:", err.message);
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
 
 
 export default router;

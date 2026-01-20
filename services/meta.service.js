@@ -31,6 +31,45 @@ export const fetchUserPages = async (userToken) => {
   return data.data || [];
 };
 
+//facebook_page_owned_search
+export const fetchPagePosts = async ({
+  pageId,
+  accessToken,
+  limit = 10
+}) => {
+  console.log("\n🔹 fetchPagePosts called");
+  console.log("  Page ID:", pageId);
+  console.log("  Limit:", limit);
+
+  try {
+    const { data } = await axios.get(`${GRAPH_API}/${pageId}/posts`, {
+      params: {
+        fields: [
+          "id",
+          "message",
+          "created_time",
+          "permalink_url",
+          "reactions.summary(true)",
+          "comments.summary(true)",
+          "shares"
+        ].join(","),
+        limit,
+        access_token: accessToken
+      }
+    });
+
+    console.log(`  ✅ Fetched ${data.data?.length || 0} page posts`);
+    return data.data || [];
+
+  } catch (error) {
+    console.error(
+      "  ❌ Page post fetch error:",
+      error.response?.data || error.message
+    );
+    throw error;
+  }
+};
+
 /**
  * Get Instagram Business Account ID
  */
