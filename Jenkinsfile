@@ -4,16 +4,9 @@ pipeline {
   environment {
     IMAGE_NAME = "brijeshkori/eminsights_backend"
     TAG = "${BUILD_NUMBER}"
-    REPO_URL = "https://github.com/EM-brijesh/eminsights-backend.git"
   }
 
   stages {
-
-    stage('Checkout Code') {
-      steps {
-        git branch: 'main', url: REPO_URL
-      }
-    }
 
     stage('Build Docker Image') {
       steps {
