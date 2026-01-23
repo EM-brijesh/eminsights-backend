@@ -17,3 +17,9 @@ spec:
         image: brijeshkori/eminsights_backend:v1
         ports:
         - containerPort: 5050
+        env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: MONGODB_URI
