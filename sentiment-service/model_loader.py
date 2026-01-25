@@ -67,8 +67,9 @@ class SentimentModelLoader:
             self.model_name = os.getenv("ANTHROPIC_MODEL") or os.getenv("LLM_MODEL_NAME") or "claude-3-haiku-20240307"
         elif self.provider == "google":
             self.api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("LLM_API_KEY")
-            self.api_base = os.getenv("GOOGLE_API_BASE") or os.getenv("LLM_BASE_URL") or "https://generativelanguage.googleapis.com/v1"
-            self.model_name = os.getenv("GOOGLE_MODEL") or os.getenv("LLM_MODEL_NAME") or "gemini-pro"
+            # Use v1beta for access to newer models like Gemini 2.5
+            self.api_base = os.getenv("GOOGLE_API_BASE") or os.getenv("LLM_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta"
+            self.model_name = os.getenv("GOOGLE_MODEL") or os.getenv("LLM_MODEL_NAME") or "gemini-2.5-flash-lite"
         elif self.provider == "deepseek":
             # DeepSeek configuration - OpenAI-compatible API
             self.api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("LLM_API_KEY")
@@ -127,38 +128,27 @@ class SentimentModelLoader:
     
     def _build_sentiment_prompt(self, text: str) -> str:
         """Build the prompt for sentiment analysis optimized for social media content"""
-        return f"""You are analyzing sentiment from social media posts and comments. Analyze the sentiment of the following text and respond with ONLY a valid JSON object.
+        return f"""Analyze the sentiment of the social media text delimited by triple backticks.
+Respond ONLY with a raw JSON object. Do not include markdown formatting, explanations, or any text outside the JSON.
 
-Text to analyze: "{text}"
+### Text to analyze: 
+```{text}```
 
-IMPORTANT GUIDELINES:
-- Consider emojis, slang, and informal language common in social media
-- Detect sarcasm and irony (mark as negative if sarcastic criticism)
-- Account for code-mixed language (Hindi/English mix, etc.)
-- Hashtags and mentions are part of the sentiment
-- ALL CAPS may indicate strong emotion (positive or negative based on content)
-- Multiple exclamation marks (!!!) often indicate strong positive or negative emotion
+### Instructions:
+1. **Linguistic Context:** Interpret emojis (e.g., 💀 can mean 'dead' or 'funny'), slang, and code-mixed language (e.g., Hindi-English).
+2. **Emotional Intensity:** ALL CAPS and multiple punctuation (!!!) should shift the sentimentScore further toward 0.0 or 1.0.
+3. **Sarcasm/Irony:** If the text uses positive words to convey a negative critique, classify as "negative".
+4. **Mixed Sentiment:** If both positive and negative elements exist, the `sentimentScore` should reflect the dominant emotion, but `confidence` should be lowered.
 
-SENTIMENT CLASSIFICATION:
-- "positive": Praise, satisfaction, happiness, excitement, support, love, appreciation
-- "negative": Criticism, anger, disappointment, frustration, hate, complaints, sadness
-- "neutral": Factual statements, questions, mixed feelings, or unclear sentiment
+### Response Schema:
+{{
+  "sentiment": "positive" | "neutral" | "negative",
+  "sentimentScore": float (0.0 to 1.0),
+  "confidence": float (0.0 to 1.0),
+  "reasoning": "A 1-sentence explanation of the detected tone"
+}}
 
-SCORING GUIDELINES:
-- sentimentScore: 0.0-0.3 (strong negative), 0.3-0.45 (mild negative), 0.45-0.55 (neutral), 0.55-0.7 (mild positive), 0.7-1.0 (strong positive)
-- confidence: How certain you are (0.0-1.0). Lower confidence for sarcasm, ambiguous text, or mixed sentiments.
-
-Respond with a JSON object containing:
-- "sentiment": one of "positive", "neutral", or "negative"
-- "sentimentScore": a number between 0.0 (most negative) and 1.0 (most positive), where 0.5 is neutral
-- "confidence": a number between 0.0 and 1.0 indicating your confidence in the classification
-
-Example responses:
-{{"sentiment": "positive", "sentimentScore": 0.85, "confidence": 0.92}}
-{{"sentiment": "negative", "sentimentScore": 0.15, "confidence": 0.88}}
-{{"sentiment": "neutral", "sentimentScore": 0.50, "confidence": 0.75}}
-
-Your response (JSON only, no other text):"""
+JSON Response:"""
     
     @retry(
         stop=stop_after_attempt(3),
@@ -227,8 +217,13 @@ Your response (JSON only, no other text):"""
         """Call Google Gemini API for sentiment analysis with retry logic"""
         prompt = self._build_sentiment_prompt(text)
         
+        # Ensure model name has 'models/' prefix
+        model_id = self.model_name
+        if not model_id.startswith("models/"):
+            model_id = f"models/{model_id}"
+        
         response = await self.client.post(
-            f"{self.api_base}/{self.model_name}:generateContent?key={self.api_key}",
+            f"{self.api_base}/{model_id}:generateContent?key={self.api_key}",
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {

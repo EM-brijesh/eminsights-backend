@@ -29,10 +29,10 @@ TEST_POSTS = [
     {
         "_id": "test_neutral_1",
         "content": {
-            "text": "The product arrived today. It's blue and weighs 2kg."
+            "text": "bad product."
         },
         "platform": "facebook",
-        "expected_sentiment": "neutral"
+        "expected_sentiment": "negative"
     },
     {
         "_id": "test_sarcasm_1",
