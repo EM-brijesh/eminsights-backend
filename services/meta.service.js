@@ -79,12 +79,13 @@ export const fetchInstagramBusinessAccount = async ({
 }) => {
   const { data } = await axios.get(`${GRAPH_API}/${pageId}`, {
     params: {
-      fields: "connected_instagram_account",
+      fields: "connected_instagram_account{id,username,name,profile_picture_url,followers_count,media_count}",
       access_token: pageAccessToken
     }
   });
 
-  return data?.connected_instagram_account?.id || null;
+  // Return full Instagram object, not just ID
+  return data?.connected_instagram_account || null;
 };
 
 /**

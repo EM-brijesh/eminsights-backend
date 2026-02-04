@@ -79,14 +79,18 @@ router.post("/pages", async (req, res) => {
  * 4️⃣ CONNECT PAGE + INSTAGRAM
  * Saves credentials required for hashtag search
  */
+/**
+ * 4️⃣ CONNECT PAGE + INSTAGRAM
+ * Saves credentials required for hashtag search
+ */
 router.post("/connect", async (req, res) => {
   try {
     const {
       pageId,
       pageName,
       pageAccessToken,
-      accountLabel, // Optional friendly name
-      connectedBy // Optional: userId who connected it
+      accountLabel,
+      connectedBy
     } = req.body;
 
     if (!pageId || !pageAccessToken) {
@@ -95,27 +99,32 @@ router.post("/connect", async (req, res) => {
       });
     }
 
-    // Fetch IG Business Account ID
-    const instagramBusinessId = await fetchInstagramBusinessAccount({
+    // Fetch Instagram Business Account with full details
+    const instagramAccount = await fetchInstagramBusinessAccount({
       pageId,
       pageAccessToken
     });
 
-    if (!instagramBusinessId) {
+    if (!instagramAccount) {
       return res.status(400).json({
         error: "No Instagram Business account linked to this page"
       });
     }
 
-    // ✅ Save or update - independent of user/brand
+    // ✅ Save with full Instagram details
     const metaAccount = await MetaAccount.findOneAndUpdate(
-      { pageId }, // Unique by pageId
+      { pageId },
       {
         pageId,
         pageName,
         pageAccessToken,
-        instagramBusinessId,
-        accountLabel: accountLabel || pageName || "Instagram Account",
+        instagramBusinessId: instagramAccount.id, // ID for API calls
+        instagramUsername: instagramAccount.username, // For display
+        instagramName: instagramAccount.name, // For display
+        instagramProfilePicture: instagramAccount.profile_picture_url, // For display
+        instagramFollowers: instagramAccount.followers_count, // For display
+        instagramMediaCount: instagramAccount.media_count, // For display
+        accountLabel: accountLabel || instagramAccount.username || pageName || "Instagram Account",
         connectedBy: connectedBy || null,
         isActive: true,
         connectedAt: new Date()
@@ -125,8 +134,8 @@ router.post("/connect", async (req, res) => {
 
     console.log("✅ MetaAccount connected (global)");
     console.log("Page:", metaAccount.pageName);
-    console.log("Instagram Business ID:", instagramBusinessId);
-    console.log("This account can now be used for ALL brands");
+    console.log("Instagram:", `@${instagramAccount.username}`);
+    console.log("Instagram Business ID:", instagramAccount.id);
 
     res.json({ 
       success: true,
@@ -136,7 +145,14 @@ router.post("/connect", async (req, res) => {
         pageId: metaAccount.pageId,
         pageName: metaAccount.pageName,
         accountLabel: metaAccount.accountLabel,
-        instagramBusinessId: metaAccount.instagramBusinessId
+        instagram: {
+          id: instagramAccount.id,
+          username: instagramAccount.username,
+          name: instagramAccount.name,
+          profile_picture: instagramAccount.profile_picture_url,
+          followers_count: instagramAccount.followers_count,
+          media_count: instagramAccount.media_count
+        }
       }
     });
   } catch (err) {
@@ -147,16 +163,33 @@ router.post("/connect", async (req, res) => {
 
 //show connected account 
 
-router.get("/connected-accounts" , async (req, res) => {
+router.get("/connected-accounts", async (req, res) => {
   try {
-    const account = await MetaAccount.find({ isActive: true });
-    res.json({ success: true, accounts: account });
-  }
-  catch (err) {
+    const accounts = await MetaAccount.find({ isActive: true });
+    
+    // Format response to include Instagram details
+    const formattedAccounts = accounts.map(acc => ({
+      id: acc._id,
+      pageId: acc.pageId,
+      pageName: acc.pageName,
+      accountLabel: acc.accountLabel,
+      connectedAt: acc.connectedAt,
+      instagram: acc.instagramBusinessId ? {
+        id: acc.instagramBusinessId,
+        username: acc.instagramUsername,
+        name: acc.instagramName,
+        profile_picture: acc.instagramProfilePicture,
+        followers_count: acc.instagramFollowers,
+        media_count: acc.instagramMediaCount
+      } : null
+    }));
+    
+    res.json({ success: true, accounts: formattedAccounts });
+  } catch (err) {
     console.error("Fetch Connected Accounts Error:", err.message);
     res.status(500).json({ error: err.message });
   }
-})
+});
 
 router.post("/page-posts", async (req, res) => {
   try {
