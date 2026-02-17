@@ -8,6 +8,7 @@ import { scheduleKeywordGroup } from "../utils/cronManager.js";
 import { fetchGoogleSearch } from "../services/google.service.js";
 import { analyzePostsSentiment } from "../services/sentiment.service.js";
 import { fetchInstagramSearch } from "../services/instagramFetcher.js";
+import { fetchFacebookPublicPosts } from "../services/fbpublicpagefetcher.js";
 
 const REALTIME_PLATFORM_FETCHERS = {
   youtube: fetchYouTubeSearch,
@@ -15,6 +16,7 @@ const REALTIME_PLATFORM_FETCHERS = {
   reddit: fetchRedditSearch,
   google: fetchGoogleSearch,
   instagram: fetchInstagramSearch,
+  facebook : fetchFacebookPublicPosts
 };
 
 const SUPPORTED_REALTIME_PLATFORMS = Object.keys(REALTIME_PLATFORM_FETCHERS);
@@ -249,6 +251,11 @@ export const runSearchForBrand = async (req, res) => {
             include: includeKeywords,
             exclude: excludeKeywords,
           });
+        } else if (platform === "facebook") {
+          fetchedData = await fetchFacebookPublicPosts(keyword, {
+            include: includeKeywords,
+            exclude: excludeKeywords,
+          });
         }
         else if (platform === "instagram") {
           fetchedData = await fetchInstagramSearch(keyword, {
@@ -317,6 +324,7 @@ export const runSearchForBrand = async (req, res) => {
         reddit: results.reddit?.length || 0,
         google: results.google?.length || 0,
         instagram: results.instagram?.length || 0,
+        facebook: results.facebook?.length || 0,
       },
       sentimentAnalysis: {
         totalScraped,

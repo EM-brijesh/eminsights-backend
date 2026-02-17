@@ -11,6 +11,7 @@ import sentimentRoutes from "./routes/sentiment.route.js";
 import { protect } from "./middleware/auth.js";
 import cookieParser from "cookie-parser";
 import metaRoutes from "./routes/meta.routes.js";
+import facebookRoutes from "./routes/facebook.routes.js";
 
 const app = express();
 
@@ -64,6 +65,7 @@ app.use("/api/users", usersRoutes);
 app.use("/api/data", protect, dataRoutes);
 app.use("/api/sentiment", protect, sentimentRoutes);
 app.use("/meta", metaRoutes);
+app.use("/fb" , facebookRoutes);
 
 // Health check route
 app.get("/health", (req, res) => {
