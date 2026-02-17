@@ -1,6 +1,6 @@
 // routes/facebookRoutes.js
 import express from "express";
-import { insertFBpage } from "../integrations/facebookPage.js";
+import { insertFBpage , getFacebookPages , toggleFacebookPageStatus } from "../integrations/facebookPage.js";
 import { fetchFacebookPublicPosts } from "../services/fbpublicpagefetcher.js";
 
 
@@ -34,6 +34,13 @@ router.post("/fetch-publicposts", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
+//additonal routes to manage page 
+router.get("/listpages", getFacebookPages);
+
+// ✅ Toggle Active/Inactive
+router.patch("/:id/toggle", toggleFacebookPageStatus);
 
 
 
