@@ -71,107 +71,29 @@ app.use("/fb" , facebookRoutes);
 app.get("/health", (req, res) => {
   res.json({ success: true, message: "✅ Server is running" });
 });
-// META ROUTES 
-// app.get('/auth/meta/login', (req, res) => {
-//   const fbLoginUrl = `https://www.facebook.com/v21.0/dialog/oauth?client_id=${process.env.META_APP_ID}&redirect_uri=${process.env.META_REDIRECT_URI}&scope=pages_show_list,pages_read_engagement,instagram_basic`;
-//   res.redirect(fbLoginUrl);
-// });
+//webhooks 
+app.get("/webhook/meta", (req, res) => {
+  const VERIFY_TOKEN = "meta-verifytoken";
 
-// app.get('/auth/meta/callback', async (req, res) => {
-//   const { code } = req.query;
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
 
-//   const tokenUrl = `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${process.env.META_APP_ID}&redirect_uri=${process.env.META_REDIRECT_URI}&client_secret=${process.env.META_APP_SECRET}&code=${code}`;
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("Webhook verified");
+    res.status(200).send(challenge);
+  } else {
+    res.sendStatus(403);
+  }
+});
 
-//   const response = await fetch(tokenUrl);
-//   const data = await response.json();
+app.post("/webhook/meta", (req, res) => {
+  console.log("Incoming Webhook:");
+  console.log(JSON.stringify(req.body, null, 2));
 
-//   console.log("Meta returned token:", data);
-
-//   if (data.error) {
-//     console.error("OAuth Error:", data.error);
-//     return res.status(400).send("Meta OAuth failed: " + data.error.message);
-//   }
-
-//   res.cookie("fb_user_token", data.access_token, {
-//     httpOnly: true,
-//     sameSite: "lax",
-//     secure: false,
-//     maxAge: 24 * 60 * 60 * 1000
-//   });
-
-//   res.redirect("http://localhost:3000/settings/channel-config");
-// });
-
-
-
-
-// app.get("/api/pages", async (req, res) => {
-//   const token = req.cookies.fb_user_token;
-//   if (!token) return res.status(401).json({ error: "Login required" });
-
-//   const url = `https://graph.facebook.com/v21.0/me/accounts?access_token=${token}`;
-//   const resp = await fetch(url);
-//   const data = await resp.json();
-
-//   // Example: user selects one page on frontend
-//   res.json(data);
-// });
-
-
-// app.post("/api/ig-account", async (req, res) => {
-//   const { pageId, pageToken, userId } = req.body;
-
-//   const url = `https://graph.facebook.com/v21.0/${pageId}?fields=connected_instagram_account&access_token=${pageToken}`;
-
-//   const response = await fetch(url);
-//   const data = await response.json();
-
-//   if (!data.connected_instagram_account) {
-//     return res.status(400).json({ error: "No IG business account connected" });
-//   }
-
-//   await MetaAccount.create({
-//     userId,
-//     pageId,
-//     pageAccessToken: pageToken,
-//     instagramBusinessId: data.connected_instagram_account.id
-//   });
-
-//   res.json({ success: true });
-// });
-
-
-
-// app.get('/api/mock-hashtag-search', (req, res) => {
-//   const mock = {
-//     hashtag: req.query.hashtag,
-//     results: [
-//       {
-//         id: "1",
-//         media_url: "https://via.placeholder.com/300",
-//         caption: "Mock fitness post 💪",
-//         username: "fit_user_1"
-//       },
-//       {
-//         id: "2",
-//         media_url: "https://via.placeholder.com/300",
-//         caption: "Another workout mock!",
-//         username: "gymlover"
-//       }
-//     ]
-//   };
-//   res.json(mock);
-// });
-
-// app.get('/api/mock-insights', (req, res) => {
-//   res.json({
-//     likes: 1240,
-//     comments: 89,
-//     saves: 52,
-//     reach: 14500,
-//     engagement_rate: 6.4
-//   });
-// });
+  // Always respond fast
+  res.sendStatus(200);
+});
 
 
 

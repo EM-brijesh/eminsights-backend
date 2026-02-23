@@ -8,13 +8,10 @@ import { protect } from "../middleware/auth.js";
 
 const router = express.Router();    
 
-//router.post("/recent",protect, searchRecent);
 router.post("/run", protect ,runSearchForBrand);
 router.post("/brandsearch" ,protect, runSearch)
-//router.post("/historical",protect, searchHistorical);
 router.post("/group/toggle", toggleKeywordGroupStatus);
 router.post("/group/run", runKeywordGroupSearch);
-// router.post("/group-run" ,protect ,runSearchForGroup)
 
 router.get("/data",protect, getPostsByBrand)
 
