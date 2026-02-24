@@ -6,6 +6,7 @@ import { Brand } from "../models/brand.js";
 const FB_GRAPH_URL = "https://graph.facebook.com/v24.0";
 const META_APP_ID = process.env.META_APP_ID;
 const META_APP_SECRET = process.env.META_APP_SECRET;
+const PAGE_ACCESS_TOKEN = process.env.META_APP_PAGE_TOKEN;
 
 const APP_ACCESS_TOKEN = `${META_APP_ID}|${META_APP_SECRET}`;
 
@@ -46,7 +47,7 @@ const fetchPostsForPublicPage = async (page, brands) => {
         const params = {
             fields:
                 "id,message,created_time,permalink_url,reactions.summary(true),comments.summary(true),shares",
-            access_token: APP_ACCESS_TOKEN,
+            access_token: PAGE_ACCESS_TOKEN,
             limit: 25,
         };
 
