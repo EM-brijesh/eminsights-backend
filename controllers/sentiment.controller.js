@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { SocialPost } from "../models/data.js";
+import { SentimentChangeLog } from "../models/sentimentChangeLog.js";
 import { Brand } from "../models/brand.js";
 import { analyzePostsSentiment } from "../services/sentiment.service.js";
 
@@ -278,6 +279,40 @@ export const analyzeSentiment = async (req, res) => {
  * POST /api/sentiment/save
  * Persist analyzed sentiment outputs to MongoDB
  */
+const applySentimentUpdate = async (postId, sentimentPayload, options = {}) => {
+  if (!postId) {
+    throw new Error("Post ID is required");
+  }
+
+  const {
+    sentimentSource = null,
+    markManual = false,
+  } = options || {};
+
+  const $set = {
+    sentiment: sentimentPayload.sentiment || null,
+    sentimentScore:
+      typeof sentimentPayload.sentimentScore === "number"
+        ? sentimentPayload.sentimentScore
+        : sentimentPayload.sentimentScore || null,
+    sentimentAnalyzedAt:
+      sentimentPayload.sentimentAnalyzedAt || new Date(),
+    "analysis.sentiment": sentimentPayload.sentiment || null,
+  };
+
+  if (sentimentSource) {
+    $set.sentimentSource = sentimentSource;
+  }
+
+  if (markManual) {
+    $set.sentimentIsManual = true;
+  } else if (typeof sentimentPayload.sentimentIsManual === "boolean") {
+    $set.sentimentIsManual = sentimentPayload.sentimentIsManual;
+  }
+
+  await SocialPost.updateOne({ _id: postId }, { $set });
+};
+
 export const saveSentiment = async (req, res) => {
   try {
     const { posts } = req.body;
@@ -296,22 +331,24 @@ export const saveSentiment = async (req, res) => {
       if (!postId) continue;
 
       try {
-        await SocialPost.updateOne(
-          { _id: postId },
+        await applySentimentUpdate(
+          postId,
           {
-            $set: {
-              sentiment: post.sentiment || null,
-              sentimentScore: post.sentimentScore || null,
-              sentimentAnalyzedAt: post.sentimentAnalyzedAt || new Date(),
-              "analysis.sentiment": post.sentiment || null,
-            },
-          }
+            sentiment: post.sentiment,
+            sentimentScore: post.sentimentScore,
+            sentimentAnalyzedAt: post.sentimentAnalyzedAt,
+            sentimentIsManual: post.sentimentIsManual,
+          },
+          {
+            // Automated saves should not mark manual; allow caller to override via payload
+            sentimentSource: post.sentimentSource || undefined,
+          },
         );
         savedCount++;
       } catch (updateError) {
         console.error(
           `Failed to save sentiment for post ${postId}:`,
-          updateError.message
+          updateError.message,
         );
       }
     }
@@ -326,6 +363,72 @@ export const saveSentiment = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message,
+    });
+  }
+};
+
+export const updateManualSentiment = async (req, res) => {
+  try {
+    const { postId, sentiment } = req.body || {};
+    const allowed = ["positive", "neutral", "negative"];
+
+    if (!postId) {
+      return res.status(400).json({
+        success: false,
+        message: "postId is required",
+      });
+    }
+
+    if (!sentiment || !allowed.includes(String(sentiment).toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: "sentiment must be one of: positive, neutral, negative",
+      });
+    }
+
+    const normalizedSentiment = String(sentiment).toLowerCase();
+    const existing = await SocialPost.findById(postId)
+      .select({ sentiment: 1 })
+      .lean();
+
+    await applySentimentUpdate(
+      postId,
+      {
+        sentiment: normalizedSentiment,
+      },
+      {
+        sentimentSource: "manual",
+        markManual: true,
+      },
+    );
+
+    try {
+      await SentimentChangeLog.create({
+        post: postId,
+        oldSentiment: existing?.sentiment ?? null,
+        newSentiment: normalizedSentiment,
+        user: req.user?._id || null,
+        changedAt: new Date(),
+      });
+    } catch (logError) {
+      console.error("Failed to write sentiment change log:", logError.message);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        postId,
+        oldSentiment: existing?.sentiment ?? null,
+        sentiment: normalizedSentiment,
+        sentimentSource: "manual",
+        sentimentAnalyzedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    console.error("Update manual sentiment error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update sentiment manually",
     });
   }
 };

@@ -20,10 +20,26 @@ async function reanalyzeSentiment() {
 
         // Find posts that need analysis or are neutral (likely from broken model)
         const query = {
-            $or: [
-                { sentiment: 'neutral' },
-                { sentiment: { $exists: false } },
-                { sentiment: null }
+            $and: [
+                {
+                    $or: [
+                        { sentiment: 'neutral' },
+                        { sentiment: { $exists: false } },
+                        { sentiment: null }
+                    ]
+                },
+                {
+                    $or: [
+                        { sentimentIsManual: { $exists: false } },
+                        { sentimentIsManual: { $ne: true } }
+                    ]
+                },
+                {
+                    $or: [
+                        { sentimentSource: { $exists: false } },
+                        { sentimentSource: { $ne: 'manual' } }
+                    ]
+                }
             ]
         };
 

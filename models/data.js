@@ -58,15 +58,26 @@ const socialPostSchema = new mongoose.Schema(
     sentiment: {
       type: String,
       enum: ['positive', 'neutral', 'negative'],
-      index: true
+      index: true,
     },
     sentimentScore: {
       type: Number,
       min: 0,
-      max: 1
+      max: 1,
     },
     sentimentAnalyzedAt: {
-      type: Date
+      type: Date,
+    },
+    sentimentSource: {
+      type: String,
+      enum: ['llm', 'heuristic', 'vader_reanalysis', 'manual', 'error'],
+      index: true,
+      default: 'llm',
+    },
+    sentimentIsManual: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
 
     fetchedAt: { type: Date, default: Date.now },
