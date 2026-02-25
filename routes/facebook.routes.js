@@ -40,7 +40,7 @@ router.post("/fetch-publicposts", async (req, res) => {
 router.get("/listpages", getFacebookPages);
 
 // ✅ Toggle Active/Inactive
-router.patch("/:id/toggle", toggleFacebookPageStatus);
+router.patch("/:pageId/toggle", toggleFacebookPageStatus);
 
 
 

@@ -43,9 +43,14 @@ export const getFacebookPages = async (req, res) => {
 
 export const toggleFacebookPageStatus = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { pageId } = req.params;
 
-    const page = await FacebookPage.findById(id);
+    console.log("Incoming pageId:", pageId);
+    console.log("Type of pageId:", typeof pageId);
+
+    const page = await FacebookPage.findOne({ pageId });
+
+    console.log("DB result:", page);
 
     if (!page) {
       return res.status(404).json({
