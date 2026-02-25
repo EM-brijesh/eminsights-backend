@@ -5,10 +5,7 @@ import { app } from "./app.js";
 import { connectToDB } from "./config/db.js";
 import { scheduleAllGroups } from "./utils/cronManager.js";
 import { pythonServiceManager } from "./services/pythonServiceManager.js";
-//import { startKeywordGroupScheduler } from "./controllers/cronscheduler.js";
 
-// Ensure we always load the .env that lives in the backend folder,
-// regardless of where `node` is executed from.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const envPath = path.join(__dirname, ".env");
@@ -56,10 +53,6 @@ async function startServer() {
       console.log('');
       console.log('✨ All services started successfully!');
     });
-
-    // startKeywordGroupScheduler().catch((err) => {
-    //   console.error("⚠️ Failed to start keyword group scheduler:", err);
-    // });
   } catch (error) {
     console.error("❌ Failed to start server:", error.message);
     pythonServiceManager.stop();
