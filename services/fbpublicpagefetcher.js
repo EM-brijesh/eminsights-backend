@@ -38,7 +38,7 @@ export const fetchFacebookPublicPosts = async () => {
         let totalSaved = 0;
 
         for (const page of pages) {
-            const saved = await fetchPostsForPublicPage(page, brands);
+            const saved = await fetchPostsForPageAndGroup(page, brands);
             totalSaved += saved;
         }
 
@@ -55,112 +55,102 @@ export const fetchFacebookPublicPosts = async () => {
    FETCH POSTS FOR ONE PAGE
 ===================================================== */
 
-const fetchPostsForPublicPage = async (page, brands) => {
+export const fetchPostsForPageAndGroup = async (brand, group) => {
     try {
-        const url = `${FB_GRAPH_URL}/${page.pageId}/posts`;
-
-        console.log("\n==============================");
-        console.log("Fetching page:", page.pageName);
-        console.log("Page ID:", page.pageId);
-        console.log("Request URL:", url);
-        console.log("Using Token Length:", META_USER_TOKEN?.length);
-        console.log("==============================");
-
-        const params = {
-            fields:
-                "id,message,created_time,permalink_url,reactions.summary(true),comments.summary(true),shares",
-            access_token: META_USER_TOKEN,
-            limit: 25,
-        };
-
-        const response = await axios.get(url, { params });
-
-        console.log("Response status:", response.status);
-
-        const posts = response.data?.data || [];
-
-        console.log("Posts fetched:", posts.length);
-
-        if (!posts.length) {
-            console.log(`No posts found for page: ${page.pageName}`);
-            return 0;
-        }
-
-        let savedCount = 0;
-
-        for (const post of posts) {
-            if (!post.message) continue;
-
-            const message = post.message.toLowerCase().trim();
-            if (!message) continue;
-
-            for (const brand of brands) {
-                for (const group of brand.keywordGroups) {
-
-                    if (
-                        group.paused ||
-                        group.status !== "running" ||
-                        !group.platforms.includes("facebook")
-                    ) {
-                        continue;
-                    }
-
-                    const containsKeyword = (keywords) =>
-                        keywords.some((kw) =>
-                            message.includes(kw.toLowerCase().trim())
-                        );
-
-                    if (!containsKeyword(group.keywords)) {
-                        continue;
-                    }
-
-                    try {
-                        await SocialPost.create({
-                            externalId: post.id,
-                            brand: brand._id,
-                            keyword: group.name || group.groupName || "facebook",
-                            platform: "facebook",
-                            groupId: page._id,
-                            groupName: page.pageName,
-                            createdAt: new Date(post.created_time),
-                            author: {
-                                id: page.pageId,
-                                name: page.pageName,
-                            },
-                            content: {
-                                text: post.message,
-                            },
-                            metrics: {
-                                likes: post.reactions?.summary?.total_count || 0,
-                                comments: post.comments?.summary?.total_count || 0,
-                                shares: post.shares?.count || 0,
-                            },
-                            sourceUrl: post.permalink_url,
-                            fetchedAt: new Date(),
-                        });
-
-                        savedCount++;
-
-                    } catch (err) {
-                        if (err.code !== 11000) {
-                            console.error("Save error:", err.message);
-                        }
-                    }
-                }
-            }
-        }
-
-        page.lastFetchedAt = new Date();
-        await page.save();
-
-        console.log(`✅ Saved ${savedCount} posts from ${page.pageName}`);
-        return savedCount;
-
-    } catch (error) {
-        console.error("❌ FULL ERROR OBJECT:");
-        console.error(error.response?.data || error.message);
-        console.error("Status Code:", error.response?.status);
-        console.error("Headers:", error.response?.headers);
+      const pages = await FacebookPage.find({ isActive: true });
+  
+      if (!pages.length) {
+        console.log("No active Facebook pages found.");
         return 0;
+      }
+  
+      let totalSaved = 0;
+  
+      for (const page of pages) {
+        const saved = await fetchSinglePageForGroup(page, brand, group);
+        totalSaved += saved;
+      }
+  
+      console.log(`🟣 Facebook total saved for group ${group.groupName}: ${totalSaved}`);
+      return totalSaved;
+  
+    } catch (error) {
+      console.error("❌ Facebook Group Fetch Failed:", error.message);
+      return 0;
     }
-};
+  };
+
+  const fetchSinglePageForGroup = async (page, brand, group) => {
+    try {
+      const url = `${FB_GRAPH_URL}/${page.pageId}/posts`;
+  
+      const params = {
+        fields:
+          "id,message,created_time,permalink_url,reactions.summary(true),comments.summary(true),shares",
+        access_token: META_USER_TOKEN,
+        limit: 25,
+      };
+  
+      const response = await axios.get(url, { params });
+      const posts = response.data?.data || [];
+  
+      if (!posts.length) return 0;
+  
+      let savedCount = 0;
+  
+      for (const post of posts) {
+        if (!post.message) continue;
+  
+        const message = post.message.toLowerCase().trim();
+        if (!message) continue;
+  
+        const containsKeyword = group.keywords.some((kw) =>
+          message.includes(kw.toLowerCase().trim())
+        );
+  
+        if (!containsKeyword) continue;
+  
+        try {
+          await SocialPost.create({
+            externalId: post.id,
+            brand: brand._id,
+            brandName: brand.brandName,
+            keyword: group.groupName,
+            platform: "facebook",
+            groupId: group._id,
+            groupName: group.groupName,
+            createdAt: new Date(post.created_time),
+            author: {
+              id: page.pageId,
+              name: page.pageName,
+            },
+            content: {
+              text: post.message,
+            },
+            metrics: {
+              likes: post.reactions?.summary?.total_count || 0,
+              comments: post.comments?.summary?.total_count || 0,
+              shares: post.shares?.count || 0,
+            },
+            sourceUrl: post.permalink_url,
+            fetchedAt: new Date(),
+          });
+  
+          savedCount++;
+        } catch (err) {
+          if (err.code !== 11000) {
+            console.error("Save error:", err.message);
+          }
+        }
+      }
+  
+      page.lastFetchedAt = new Date();
+      await page.save();
+  
+      return savedCount;
+  
+    } catch (error) {
+      console.error(`❌ Facebook page error (${page.pageName}):`, error.message);
+      return 0;
+    }
+  };
