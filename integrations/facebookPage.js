@@ -45,17 +45,15 @@ export const toggleFacebookPageStatus = async (req, res) => {
   try {
     const { pageId } = req.params;
 
-    console.log("Incoming pageId:", pageId);
-    console.log("Type of pageId:", typeof pageId);
-
-    const page = await FacebookPage.findOne({ pageId });
-
-    console.log("DB result:", page);
+    const isObjectId = /^[a-f\d]{24}$/i.test(pageId);
+    const page = isObjectId
+      ? (await FacebookPage.findById(pageId)) ?? (await FacebookPage.findOne({ pageId }))
+      : await FacebookPage.findOne({ pageId });
 
     if (!page) {
       return res.status(404).json({
         success: false,
-        message: "Page not found",
+        message: `Page not found for identifier: ${pageId}`,
       });
     }
 
