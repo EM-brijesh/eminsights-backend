@@ -412,6 +412,7 @@ export async function analyzePostSentiment(post) {
       sentimentConfidence: result.sentimentConfidence || 0.0,
       sentimentAnalyzedAt: result.sentimentAnalyzedAt || new Date(),
       sentimentSource: result.sentimentSource || "llm",
+      language: result.language || null,
       processingTimeMs: duration,
     };
   } catch (error) {
@@ -512,6 +513,7 @@ export async function analyzePostsSentiment(posts, options = {}) {
             sentimentConfidence: result.sentimentConfidence,
             sentimentAnalyzedAt: result.sentimentAnalyzedAt || new Date(),
             sentimentSource: result.sentimentSource || "llm",
+            language: result.language || null,
             sentimentError: null,
             analysis: {
               ...(post.analysis || {}),

@@ -141,6 +141,7 @@ const analyzePostsBeforeSave = async (posts) => {
           sentimentAnalyzedAt: analyzed.sentimentAnalyzedAt || new Date(),
           sentimentSource: analyzed.sentimentSource || null,
           sentimentExplanation: analyzed.sentimentExplanation || null,
+          language: analyzed.language || null,
           analysis: {
             ...(post.analysis || {}),
             sentiment: analyzed.sentiment || null,

@@ -310,6 +310,10 @@ const applySentimentUpdate = async (postId, sentimentPayload, options = {}) => {
     $set.sentimentIsManual = sentimentPayload.sentimentIsManual;
   }
 
+  if (sentimentPayload.language) {
+    $set.language = sentimentPayload.language;
+  }
+
   await SocialPost.updateOne({ _id: postId }, { $set });
 };
 
@@ -338,6 +342,7 @@ export const saveSentiment = async (req, res) => {
             sentimentScore: post.sentimentScore,
             sentimentAnalyzedAt: post.sentimentAnalyzedAt,
             sentimentIsManual: post.sentimentIsManual,
+            language: post.language || undefined,
           },
           {
             // Automated saves should not mark manual; allow caller to override via payload
@@ -761,6 +766,23 @@ export const getSentimentSummary = async (req, res) => {
             { $sort: { total: -1 } },
             { $limit: 25 },
           ],
+          languageBreakdown: [
+            {
+              $group: {
+                _id: { $ifNull: ["$language", "undefined"] },
+                count: { $sum: 1 },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                language: "$_id",
+                count: 1,
+              },
+            },
+            { $sort: { count: -1 } },
+            { $limit: 20 },
+          ],
           timeline: [
             {
               $group: {
@@ -841,6 +863,11 @@ export const getSentimentSummary = async (req, res) => {
       pending: entry.pending || Math.max((entry.total || 0) - (entry.analyzed || 0), 0),
     }));
 
+    const languages = (result?.languageBreakdown || []).map((entry) => ({
+      language: entry.language || "undefined",
+      count: entry.count || 0,
+    }));
+
     const timeline = (result?.timeline || []).map((entry) => ({
       date: entry.date,
       positive: entry.positive || 0,
@@ -880,6 +907,7 @@ export const getSentimentSummary = async (req, res) => {
       sentiment,
       platforms,
       keywords,
+      languages,
       timeline,
     });
   } catch (error) {

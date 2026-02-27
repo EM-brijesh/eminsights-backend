@@ -5,3 +5,4 @@ httpx[http2]>=0.27.0
 python-multipart>=0.0.12
 python-dotenv>=1.0.0
 tenacity>=8.2.3
+langdetect>=1.0.9

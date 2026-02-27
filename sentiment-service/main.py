@@ -12,6 +12,13 @@ import logging
 from pathlib import Path
 from model_loader import SentimentModelLoader
 
+try:
+    from langdetect import detect as _langdetect_detect, LangDetectException
+    _LANGDETECT_AVAILABLE = True
+except ImportError:
+    _LANGDETECT_AVAILABLE = False
+    LangDetectException = Exception
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -85,6 +92,7 @@ class SentimentResult(BaseModel):
     sentimentConfidence: float
     sentimentAnalyzedAt: str
     sentimentSource: str = "llm"
+    language: Optional[str] = None
 
 class AnalyzeResponse(BaseModel):
     results: List[SentimentResult]
@@ -111,6 +119,62 @@ def extract_text_from_post(post: Dict) -> str:
         )
     
     return text.strip()
+
+
+import re as _re
+
+_MIN_CHARS_FOR_DETECTION = 10
+_SCRIPT_MIN_CHARS = 4
+
+_SCRIPT_PATTERNS: list[tuple[_re.Pattern, str]] = [
+    (_re.compile(r'[\u0900-\u097F]'), 'hi'),   # Devanagari → Hindi
+    (_re.compile(r'[\u0980-\u09FF]'), 'bn'),   # Bengali
+    (_re.compile(r'[\u0A00-\u0A7F]'), 'pa'),   # Gurmukhi → Punjabi
+    (_re.compile(r'[\u0A80-\u0AFF]'), 'gu'),   # Gujarati
+    (_re.compile(r'[\u0B00-\u0B7F]'), 'or'),   # Odia
+    (_re.compile(r'[\u0B80-\u0BFF]'), 'ta'),   # Tamil
+    (_re.compile(r'[\u0C00-\u0C7F]'), 'te'),   # Telugu
+    (_re.compile(r'[\u0C80-\u0CFF]'), 'kn'),   # Kannada
+    (_re.compile(r'[\u0D00-\u0D7F]'), 'ml'),   # Malayalam
+    (_re.compile(r'[\u0600-\u06FF]'), 'ur'),   # Arabic script → Urdu
+]
+
+
+def _detect_by_script(text: str) -> str | None:
+    """Use Unicode script ranges to detect Indian languages reliably."""
+    best_lang = None
+    best_count = 0
+    for pattern, lang in _SCRIPT_PATTERNS:
+        count = len(pattern.findall(text))
+        if count >= _SCRIPT_MIN_CHARS and count > best_count:
+            best_lang = lang
+            best_count = count
+    return best_lang
+
+
+def detect_language(text: str) -> str:
+    """Detect the language of the given text.
+
+    Uses script-based detection first (reliable for Indian languages),
+    then falls back to langdetect for Latin-script languages.
+    Returns an ISO 639-1 code (e.g. "en", "hi") or "undefined".
+    """
+    if not text or len(text.strip()) < _MIN_CHARS_FOR_DETECTION:
+        return "undefined"
+
+    script_lang = _detect_by_script(text)
+    if script_lang:
+        return script_lang
+
+    if not _LANGDETECT_AVAILABLE:
+        return "undefined"
+    try:
+        return _langdetect_detect(text)
+    except LangDetectException:
+        return "undefined"
+    except Exception:
+        return "undefined"
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -247,6 +311,8 @@ async def analyze_sentiment(request: AnalyzeRequest):
             # Set sentiment source based on provider
             provider_name = model_loader.provider if model_loader else "llm"
             result['sentimentSource'] = f'llm_{provider_name}'
+
+            result['language'] = detect_language(texts[i])
             
             # Ensure _id or id is present
             if not result.get('_id') and not result.get('id'):
@@ -263,6 +329,47 @@ async def analyze_sentiment(request: AnalyzeRequest):
             status_code=500,
             detail=f"Error during sentiment analysis: {str(e)}"
         )
+
+class DetectLanguageItem(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    _id: Optional[str] = None
+    id: Optional[str] = None
+    content: Optional[PostContent] = None
+    text: Optional[str] = None
+    title: Optional[str] = None
+    summary: Optional[str] = None
+
+class DetectLanguageRequest(BaseModel):
+    posts: List[DetectLanguageItem]
+
+class LanguageResult(BaseModel):
+    _id: Optional[str] = None
+    id: Optional[str] = None
+    language: str
+
+class DetectLanguageResponse(BaseModel):
+    results: List[LanguageResult]
+
+
+@app.post("/detect-language", response_model=DetectLanguageResponse)
+async def detect_language_endpoint(request: DetectLanguageRequest):
+    """Detect language for a batch of posts without running sentiment analysis."""
+    if not request.posts:
+        return DetectLanguageResponse(results=[])
+
+    results: List[Dict[str, Any]] = []
+    for post in request.posts:
+        post_dict = post.model_dump() if hasattr(post, 'model_dump') else {}
+        text = extract_text_from_post(post_dict)
+        lang = detect_language(text)
+        results.append({
+            "_id": post_dict.get("_id"),
+            "id": post_dict.get("id"),
+            "language": lang,
+        })
+
+    return DetectLanguageResponse(results=results)
+
 
 if __name__ == "__main__":
     import uvicorn

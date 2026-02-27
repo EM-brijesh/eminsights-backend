@@ -80,6 +80,11 @@ const socialPostSchema = new mongoose.Schema(
       index: true,
     },
 
+    language: {
+      type: String,
+      index: true,
+    },
+
     fetchedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
