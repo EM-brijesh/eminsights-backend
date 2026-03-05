@@ -18,9 +18,16 @@ export const getTwitterSearchResults = async ({
   const params = {
     query,
     max_results: Math.min(Math.max(maxResults, 10), 100),
-    "tweet.fields": "created_at,public_metrics,author_id,text",
-    expansions: "author_id",
-    "user.fields": "name,username,profile_image_url"
+
+    // ⭐ Added geo field
+    "tweet.fields": "created_at,public_metrics,author_id,text,geo",
+
+    expansions: "author_id,geo.place_id",
+
+    "user.fields": "name,username,profile_image_url",
+
+    // ⭐ Required for location
+    "place.fields": "id,full_name,name,country,country_code,place_type,geo",
   };
 
   if (startDate) params.start_time = new Date(startDate).toISOString();
@@ -37,7 +44,7 @@ export const getTwitterSearchResults = async ({
 
     if (!data?.data) return [];
 
-    // Create mapping of users by ID
+    // Map users
     const usersMap = {};
     if (data.includes?.users) {
       data.includes.users.forEach((u) => {
@@ -45,23 +52,59 @@ export const getTwitterSearchResults = async ({
       });
     }
 
-    // Merge tweets + user info
+    // ⭐ Map places
+    const placesMap = {};
+    if (data.includes?.places) {
+      data.includes.places.forEach((p) => {
+        placesMap[p.id] = p;
+      });
+    }
+
+    // Merge tweet + user + location
     return data.data.map((tweet) => {
       const user = usersMap[tweet.author_id] || {};
+
+      const place = tweet.geo?.place_id
+        ? placesMap[tweet.geo.place_id]
+        : null;
+
+      const location = place
+        ? {
+            placeId: place.id,
+            name: place.name,
+            fullName: place.full_name,
+            country: place.country,
+            countryCode: place.country_code,
+            placeType: place.place_type,
+            coordinates: place.geo?.geometry
+              ? {
+                  type: "Point",
+                  coordinates: place.geo.geometry.coordinates,
+                }
+              : null,
+          }
+        : null;
 
       return {
         tweetId: tweet.id,
         text: tweet.text,
+
         authorId: tweet.author_id,
         authorName: user.name || "",
         authorUsername: user.username || "",
         authorProfileImage: user.profile_image_url || "",
+
         createdAt: tweet.created_at,
+
         retweetCount: tweet.public_metrics?.retweet_count,
         replyCount: tweet.public_metrics?.reply_count,
         likeCount: tweet.public_metrics?.like_count,
         quoteCount: tweet.public_metrics?.quote_count,
+
         tweetUrl: `https://twitter.com/i/web/status/${tweet.id}`,
+
+        // ⭐ location added
+        location,
       };
     });
   } catch (error) {
