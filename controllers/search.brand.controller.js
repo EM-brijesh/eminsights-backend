@@ -803,13 +803,16 @@ export const runKeywordGroupSearch = async (req, res) => {
     let duplicateCount = 0;
 
     if (analyzedPosts.length > 0) {
+       console.log("📝 Sample analyzed post:", JSON.stringify(analyzedPosts[0], null, 2)); // ADD
       try {
         const result = await SocialPost.insertMany(analyzedPosts, {
           ordered: false,
           rawResult: true,
         });
+        console.log("✅ insertMany result:", JSON.stringify(result, null, 2)); // ADD
         savedCount = result.insertedCount || analyzedPosts.length;
       } catch (saveError) {
+         console.error("❌ FULL SAVE ERROR:", JSON.stringify(saveError, null, 2)); // ADD
         if (saveError.code === 11000 || saveError.name === "MongoBulkWriteError") {
           if (saveError.result && saveError.result.nInserted) {
             savedCount = saveError.result.nInserted;
