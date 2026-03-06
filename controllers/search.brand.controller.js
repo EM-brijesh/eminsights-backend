@@ -767,7 +767,7 @@ export const runKeywordGroupSearch = async (req, res) => {
                 name: item.authorName || item.authorUsername || null,
               };
               doc.content = {
-                text: item.text || null,
+                text: item.text || item.content?.text || null,
               };
               doc.metrics = {
                 likes: item.likeCount || 0,
