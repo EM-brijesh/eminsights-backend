@@ -731,7 +731,7 @@ export const runKeywordGroupSearch = async (req, res) => {
             brand,
             group,
           });
-          console.log("  🔍 Raw fetched item[0]:", JSON.stringify(fetchedData[0], null, 2));  // ADD THIS
+
           console.log(`  ✅ Fetched ${fetchedData.length} posts from ${platform}`);
         } catch (fetchErr) {
           console.error(`  ❌ Group Fetch Error [${platform}]`, {
@@ -759,31 +759,17 @@ export const runKeywordGroupSearch = async (req, res) => {
               fetchedAt: new Date(),
             };
 
-            // ✅ Twitter-specific field mapping
-            if (platform === "twitter") {
-              doc.sourceUrl = item.tweetUrl || null;
-              doc.author = {
-                id: item.authorId || null,
-                name: item.authorName || item.authorUsername || null,
-              };
-              doc.content = {
-                text: item.text || item.content?.text || null,
-              };
-              doc.metrics = {
-                likes: item.likeCount || 0,
-                comments: item.replyCount || 0,
-                shares: item.retweetCount || 0,
-                views: 0,
-              };
-              doc.location = item.location || null;
-            } else {
-              // ✅ Other platforms — assume their fetcher already returns schema-shaped fields
-              doc.sourceUrl = item.sourceUrl || null;
-              doc.author = item.author || {};
-              doc.content = item.content || {};
-              doc.metrics = item.metrics || {};
-              doc.location = item.location || null;
-            }
+            // ✅ All platforms — fetcher already returns schema-shaped fields
+            doc.sourceUrl = item.sourceUrl || null;
+            doc.author = item.author || {};
+            doc.content = item.content || {};
+            doc.metrics = {
+              likes: item.metrics?.likes || 0,
+              comments: item.metrics?.comments || 0,
+              shares: item.metrics?.shares || 0,
+              views: item.metrics?.views || 0,
+            };
+            doc.location = item.location || null;
 
             return doc;
           });
@@ -865,4 +851,3 @@ export const runKeywordGroupSearch = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
