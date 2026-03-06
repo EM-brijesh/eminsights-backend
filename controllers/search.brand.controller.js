@@ -699,7 +699,7 @@ export const runKeywordGroupSearch = async (req, res) => {
         } catch (fbErr) {
           console.error("❌ Facebook fetch error:", fbErr.message);
         }
-        continue; // Skip keyword loop for Facebook
+        continue;
       }
 
       // 🔵 Other platforms (keyword-driven)
@@ -729,7 +729,7 @@ export const runKeywordGroupSearch = async (req, res) => {
             startDate,
             endDate,
             brand,
-            group
+            group,
           });
 
           console.log(`  ✅ Fetched ${fetchedData.length} posts from ${platform}`);
@@ -739,7 +739,7 @@ export const runKeywordGroupSearch = async (req, res) => {
             group: group.groupName,
             keyword,
             error: fetchErr.message,
-            stack: fetchErr.stack
+            stack: fetchErr.stack,
           });
           continue;
         }
@@ -747,17 +747,48 @@ export const runKeywordGroupSearch = async (req, res) => {
         summary[platform] += fetchedData.length;
 
         if (fetchedData.length > 0) {
-          const docs = fetchedData.map((item) => ({
-            ...item,
-            brand: brand._id,
-            brandName: brand.brandName,
-            keyword,
-            platform,
-            groupId: group._id,
-            groupName: group.groupName,
-            createdAt: new Date(item.createdAt || item.publishedAt || Date.now()),
-            fetchedAt: new Date(),
-          }));
+          const docs = fetchedData.map((item) => {
+            // ✅ Base fields common to all platforms
+            const doc = {
+              brand: brand._id,
+              keyword,
+              platform,
+              groupId: group._id,
+              groupName: group.groupName,
+              createdAt: new Date(item.createdAt || item.publishedAt || Date.now()),
+              fetchedAt: new Date(),
+            };
+
+            // ✅ Twitter-specific field mapping
+            if (platform === "twitter") {
+              doc.sourceUrl = item.tweetUrl || null;
+              doc.author = {
+                id: item.authorId || null,
+                name: item.authorName || item.authorUsername || null,
+              };
+              doc.content = {
+                text: item.text || null,
+              };
+              doc.metrics = {
+                likes: item.likeCount || 0,
+                comments: item.replyCount || 0,
+                shares: item.retweetCount || 0,
+                views: 0,
+              };
+              doc.location = item.location || null;
+            } else {
+              // ✅ Other platforms — assume their fetcher already returns schema-shaped fields
+              doc.sourceUrl = item.sourceUrl || null;
+              doc.author = item.author || {};
+              doc.content = item.content || {};
+              doc.metrics = item.metrics || {};
+              doc.location = item.location || null;
+            }
+
+            return doc;
+          });
+
+          console.log(`  📝 Sample doc for ${platform}:`, JSON.stringify(docs[0], null, 2));
 
           postsToInsert.push(...docs);
         }
@@ -770,7 +801,7 @@ export const runKeywordGroupSearch = async (req, res) => {
     console.log("Total posts to insert:", postsToInsert.length);
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
-    // 🔎 Sentiment analysis (only for keyword-driven platforms)
+    // 🔎 Sentiment analysis
     let analyzedPosts = postsToInsert;
     let analyzedCount = 0;
     let failedCount = 0;
@@ -778,7 +809,7 @@ export const runKeywordGroupSearch = async (req, res) => {
 
     if (postsToInsert.length > 0) {
       analyzedPosts = await analyzePostsBeforeSave(postsToInsert);
-      analyzedCount = analyzedPosts.filter(p => p.sentiment).length;
+      analyzedCount = analyzedPosts.filter((p) => p.sentiment).length;
       failedCount = totalScraped - analyzedCount;
     }
 
@@ -787,13 +818,13 @@ export const runKeywordGroupSearch = async (req, res) => {
 
     if (analyzedPosts.length > 0) {
       try {
-        const result = await SocialPost.insertMany(analyzedPosts, { 
+        const result = await SocialPost.insertMany(analyzedPosts, {
           ordered: false,
-          rawResult: true 
+          rawResult: true,
         });
         savedCount = result.insertedCount || analyzedPosts.length;
       } catch (saveError) {
-        if (saveError.code === 11000 || saveError.name === 'MongoBulkWriteError') {
+        if (saveError.code === 11000 || saveError.name === "MongoBulkWriteError") {
           if (saveError.result && saveError.result.nInserted) {
             savedCount = saveError.result.nInserted;
           } else if (saveError.insertedDocs) {
@@ -802,13 +833,13 @@ export const runKeywordGroupSearch = async (req, res) => {
 
           if (saveError.writeErrors) {
             duplicateCount = saveError.writeErrors.filter(
-              err => err.code === 11000
+              (err) => err.code === 11000
             ).length;
           }
 
-          console.log(`Successfully saved ${savedCount} posts, skipped ${duplicateCount} duplicates`);
+          console.log(`✅ Saved ${savedCount} posts, skipped ${duplicateCount} duplicates`);
         } else {
-          console.error("Error saving posts:", saveError);
+          console.error("❌ Error saving posts:", saveError);
         }
       }
     }
@@ -829,7 +860,6 @@ export const runKeywordGroupSearch = async (req, res) => {
       duplicates: duplicateCount,
       totalAttempted: analyzedPosts.length,
     });
-
   } catch (err) {
     console.error("Group Search Run Error:", err);
     res.status(500).json({ success: false, message: err.message });
