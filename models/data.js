@@ -28,7 +28,8 @@ const socialPostSchema = new mongoose.Schema(
       trim: true,
     },
 
-    createdAt: { type: Date, required: true },
+    // ⭐ renamed to avoid conflict with mongoose timestamps
+    postCreatedAt: { type: Date, required: true },
 
     author: {
       id: { type: String },
@@ -56,7 +57,6 @@ const socialPostSchema = new mongoose.Schema(
       engagementScore: { type: Number },
     },
 
-    // Sentiment analysis fields
     sentiment: {
       type: String,
       enum: ["positive", "neutral", "negative"],
@@ -91,17 +91,14 @@ const socialPostSchema = new mongoose.Schema(
       index: true,
     },
 
-    // ⭐ NEW LOCATION FIELD
+    // ⭐ LOCATION
     location: {
-      placeId: { type: String },
-
-      name: { type: String }, // city name
-      fullName: { type: String }, // "Lakewood, CO"
-
-      country: { type: String },
-      countryCode: { type: String },
-
-      placeType: { type: String }, // city, admin, country
+      placeId: String,
+      name: String,
+      fullName: String,
+      country: String,
+      countryCode: String,
+      placeType: String,
 
       coordinates: {
         type: {
@@ -109,7 +106,7 @@ const socialPostSchema = new mongoose.Schema(
           enum: ["Point"],
         },
         coordinates: {
-          type: [Number], // [longitude, latitude]
+          type: [Number],
         },
       },
     },
@@ -119,13 +116,15 @@ const socialPostSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Indexing for performance
+// Indexes
 socialPostSchema.index({ brand: 1 });
 socialPostSchema.index({ keyword: 1 });
 socialPostSchema.index({ platform: 1 });
-socialPostSchema.index({ createdAt: -1 });
+socialPostSchema.index({ postCreatedAt: -1 });
 
-socialPostSchema.index({ brand: 1, keyword: 1, platform: 1, createdAt: -1 });
+socialPostSchema.index(
+  { brand: 1, keyword: 1, platform: 1, postCreatedAt: -1 }
+);
 
 socialPostSchema.index(
   { sourceUrl: 1, platform: 1 },
@@ -134,7 +133,7 @@ socialPostSchema.index(
 
 socialPostSchema.index({ sentimentAnalyzedAt: -1 });
 
-// ⭐ GEO INDEX FOR HEATMAPS
+// ⭐ GEO INDEX
 socialPostSchema.index({ "location.coordinates": "2dsphere" });
 
 export const SocialPost = mongoose.model("SocialPost", socialPostSchema);
