@@ -83,7 +83,7 @@ const socialPostSchema = new mongoose.Schema(
     },
     sentimentSource: {
       type: String,
-      enum: ["llm", "heuristic", "vader_reanalysis", "manual", "error"],
+      enum: ["llm","llm_google", "heuristic", "vader_reanalysis", "manual", "error"],
       index: true,
       default: "llm",
     },
