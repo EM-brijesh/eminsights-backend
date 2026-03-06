@@ -76,15 +76,20 @@ export const getTwitterSearchResults = async ({
 
       const location = place
         ? {
-            placeId: place.id,
-            name: place.name,
-            fullName: place.full_name,
-            country: place.country,
-            countryCode: place.country_code,
-            placeType: place.place_type,
-            coordinates,
-          }
-        : null;
+          placeId: place.id,
+          name: place.name,
+          fullName: place.full_name,
+          country: place.country,
+          countryCode: place.country_code,
+          placeType: place.place_type,
+          coordinates: place.geo?.geometry
+            ? {
+              type: "Point",
+              coordinates: place.geo.geometry.coordinates,
+            }
+            : undefined,
+        }
+        : undefined;
 
       return {
         tweetId: tweet.id,
