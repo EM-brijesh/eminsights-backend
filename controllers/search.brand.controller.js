@@ -8,7 +8,7 @@ import { scheduleKeywordGroup } from "../utils/cronManager.js";
 import { fetchGoogleSearch } from "../services/google.service.js";
 import { analyzePostsSentiment } from "../services/sentiment.service.js";
 import { fetchInstagramSearch } from "../services/instagramFetcher.js";
-import { fetchFacebookPublicPosts  , fetchPostsForPageAndGroup} from "../services/fbpublicpagefetcher.js";
+import { fetchFacebookPublicPosts, fetchPostsForPageAndGroup } from "../services/fbpublicpagefetcher.js";
 
 const REALTIME_PLATFORM_FETCHERS = {
   youtube: fetchYouTubeSearch,
@@ -16,7 +16,7 @@ const REALTIME_PLATFORM_FETCHERS = {
   reddit: fetchRedditSearch,
   google: fetchGoogleSearch,
   instagram: fetchInstagramSearch,
-   facebook : fetchFacebookPublicPosts
+  facebook: fetchFacebookPublicPosts
 };
 
 const SUPPORTED_REALTIME_PLATFORMS = Object.keys(REALTIME_PLATFORM_FETCHERS);
@@ -90,7 +90,7 @@ const analyzePostsBeforeSave = async (posts) => {
 
   try {
     console.log(`Analyzing ${posts.length} posts for sentiment before saving...`);
-    
+
     // Analyze all posts with no limits - process entire array
     const analysisResult = await analyzePostsSentiment(posts, {
       concurrency: 5, // Default concurrency
@@ -102,7 +102,7 @@ const analyzePostsBeforeSave = async (posts) => {
     const errors = analysisResult.errors || [];
 
     console.log(`Sentiment analysis completed: ${analyzedCount} successful, ${failedCount} failed out of ${posts.length} total`);
-    
+
     // Log detailed failure statistics
     if (errors.length > 0) {
       const failuresByPlatform = {};
@@ -115,7 +115,7 @@ const analyzePostsBeforeSave = async (posts) => {
       });
       console.log(`Failures by platform:`, failuresByPlatform);
       console.log(`Failures by error type:`, failuresByError);
-      
+
       // Log sample errors for debugging
       const sampleErrors = errors.slice(0, 5);
       console.log(`Sample errors (first 5):`, sampleErrors.map(e => ({
@@ -130,7 +130,7 @@ const analyzePostsBeforeSave = async (posts) => {
     // This is more reliable than ID matching for new posts that don't have _id yet
     return posts.map((post, index) => {
       const analyzed = analyzedPosts[index];
-      
+
       // If we have an analyzed result at this index, merge sentiment data
       if (analyzed && analyzed.sentiment) {
         return {
@@ -152,7 +152,7 @@ const analyzePostsBeforeSave = async (posts) => {
           },
         };
       }
-      
+
       // If analysis failed or returned null sentiment, log it but still return the post
       if (analyzed && analyzed.sentimentError) {
         const textPreview = (post.content?.text || post.content?.title || post.text || post.title || '').substring(0, 100);
@@ -172,7 +172,7 @@ const analyzePostsBeforeSave = async (posts) => {
           keyword: post.keyword,
         });
       }
-      
+
       // Return original post (with null sentiment) if analysis failed or wasn't found
       return post;
     });
@@ -615,7 +615,7 @@ export const toggleKeywordGroupStatus = async (req, res) => {
     }
 
     await brand.save();
-    await scheduleKeywordGroup(brand, group); 
+    await scheduleKeywordGroup(brand, group);
 
     return res.json({
       success: true,
@@ -750,12 +750,19 @@ export const runKeywordGroupSearch = async (req, res) => {
           const docs = fetchedData.map((item) => ({
             ...item,
             brand: brand._id,
-            brandName: brand.brandName,
             keyword,
             platform,
             groupId: group._id,
             groupName: group.groupName,
-            createdAt: new Date(item.createdAt || item.publishedAt || Date.now()),
+
+            // ⭐ FIXED FIELD NAME
+            postCreatedAt: new Date(
+              item.postCreatedAt ||
+              item.createdAt ||
+              item.publishedAt ||
+              Date.now()
+            ),
+
             fetchedAt: new Date(),
           }));
 
@@ -787,9 +794,9 @@ export const runKeywordGroupSearch = async (req, res) => {
 
     if (analyzedPosts.length > 0) {
       try {
-        const result = await SocialPost.insertMany(analyzedPosts, { 
+        const result = await SocialPost.insertMany(analyzedPosts, {
           ordered: false,
-          rawResult: true 
+          rawResult: true
         });
         savedCount = result.insertedCount || analyzedPosts.length;
       } catch (saveError) {
