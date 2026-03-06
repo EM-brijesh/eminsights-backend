@@ -13,11 +13,10 @@ const socialPostSchema = new mongoose.Schema(
 
     platform: {
       type: String,
-      enum: ["twitter", "youtube", "reddit", "google" ,"facebook" , "instagram"],
+      enum: ["twitter", "youtube", "reddit", "google", "facebook", "instagram"],
       required: true,
     },
 
-    // ⭐ NEW FIELD ADD
     groupId: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
@@ -54,10 +53,24 @@ const socialPostSchema = new mongoose.Schema(
       engagementScore: { type: Number },
     },
 
+    // ⭐ Location data (currently populated for Twitter only)
+    location: {
+      placeId: { type: String },
+      fullName: { type: String },   // e.g. "Lakewood, CO"
+      country: { type: String },    // e.g. "United States"
+      countryCode: { type: String, index: true }, // e.g. "US"
+      placeType: { type: String },  // e.g. "city", "country", "admin"
+      coordinates: {
+        type: [Number],             // [longitude, latitude] — GeoJSON order
+        index: "2dsphere",
+        sparse: true,
+      },
+    },
+
     // Sentiment analysis fields
     sentiment: {
       type: String,
-      enum: ['positive', 'neutral', 'negative'],
+      enum: ["positive", "neutral", "negative"],
       index: true,
     },
     sentimentScore: {
@@ -70,9 +83,9 @@ const socialPostSchema = new mongoose.Schema(
     },
     sentimentSource: {
       type: String,
-      enum: ['llm', 'heuristic', 'vader_reanalysis', 'manual', 'error'],
+      enum: ["llm", "heuristic", "vader_reanalysis", "manual", "error"],
       index: true,
-      default: 'llm',
+      default: "llm",
     },
     sentimentIsManual: {
       type: Boolean,
@@ -101,5 +114,9 @@ socialPostSchema.index({ brand: 1, keyword: 1, platform: 1, createdAt: -1 });
 socialPostSchema.index({ sourceUrl: 1, platform: 1 }, { unique: true, sparse: true });
 
 socialPostSchema.index({ sentimentAnalyzedAt: -1 });
+
+// Location indexes
+socialPostSchema.index({ "location.countryCode": 1 });
+socialPostSchema.index({ "location.placeType": 1 });
 
 export const SocialPost = mongoose.model("SocialPost", socialPostSchema);
