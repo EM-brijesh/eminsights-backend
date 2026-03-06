@@ -731,7 +731,7 @@ export const runKeywordGroupSearch = async (req, res) => {
             brand,
             group,
           });
-
+          console.log("  🔍 Raw fetched item[0]:", JSON.stringify(fetchedData[0], null, 2));  // ADD THIS
           console.log(`  ✅ Fetched ${fetchedData.length} posts from ${platform}`);
         } catch (fetchErr) {
           console.error(`  ❌ Group Fetch Error [${platform}]`, {
