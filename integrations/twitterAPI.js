@@ -37,7 +37,6 @@ export const getTwitterSearchResults = async ({
 
     if (!data?.data) return [];
 
-    // Build users lookup map
     const usersMap = {};
     if (data.includes?.users) {
       data.includes.users.forEach((u) => {
@@ -45,7 +44,6 @@ export const getTwitterSearchResults = async ({
       });
     }
 
-    // Build places lookup map
     const placesMap = {};
     if (data.includes?.places) {
       data.includes.places.forEach((p) => {
@@ -58,36 +56,23 @@ export const getTwitterSearchResults = async ({
       const place = tweet.geo?.place_id ? placesMap[tweet.geo.place_id] : null;
 
       return {
-        // ✅ tweetId always set — used as reliable dedup key in the DB index
         tweetId: tweet.id,
-
-        // ✅ sourceUrl built from tweet.id — will be undefined if tweet.id missing (extremely rare)
-        sourceUrl: tweet.id ? `https://twitter.com/i/web/status/${tweet.id}` : undefined,
-
+        text: tweet.text,
+        authorId: tweet.author_id,
+        authorName: user.name || "",
+        authorUsername: user.username || "",
+        authorProfileImage: user.profile_image_url || "",
         createdAt: tweet.created_at,
+        language: tweet.lang || null,
 
-        // ✅ Guard against "undefined" string — only save real lang codes
-        language: (tweet.lang && tweet.lang !== "und") ? tweet.lang : null,
+        retweetCount: tweet.public_metrics?.retweet_count || 0,
+        replyCount: tweet.public_metrics?.reply_count || 0,
+        likeCount: tweet.public_metrics?.like_count || 0,
+        quoteCount: tweet.public_metrics?.quote_count || 0,
 
-        author: {
-          id: tweet.author_id || null,
-          name: user.name || null,
-          username: user.username || null,
-          profileImage: user.profile_image_url || null,
-        },
+        tweetUrl: `https://twitter.com/i/web/status/${tweet.id}`,
 
-        content: {
-          text: tweet.text || null,
-        },
-
-        metrics: {
-          likes: tweet.public_metrics?.like_count || 0,
-          comments: tweet.public_metrics?.reply_count || 0,
-          shares: tweet.public_metrics?.retweet_count || 0,
-          views: tweet.public_metrics?.impression_count || 0,
-        },
-
-        // ✅ Prefer geo place (tweet-level), fall back to user.location string
+        // ⭐ Simplified location (matches your schema)
         location: place
           ? {
               placeId: place.id,
@@ -97,7 +82,9 @@ export const getTwitterSearchResults = async ({
               placeType: place.place_type,
             }
           : user.location
-          ? { fullName: user.location }
+          ? {
+              fullName: user.location,
+            }
           : null,
       };
     });

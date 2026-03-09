@@ -1,3 +1,4 @@
+// models/data.js
 import mongoose from "mongoose";
 
 const socialPostSchema = new mongoose.Schema(
@@ -32,8 +33,6 @@ const socialPostSchema = new mongoose.Schema(
     author: {
       id: { type: String },
       name: { type: String },
-      username: { type: String },
-      profileImage: { type: String },
     },
 
     content: {
@@ -51,24 +50,22 @@ const socialPostSchema = new mongoose.Schema(
 
     sourceUrl: { type: String },
 
-    // ✅ FIX: tweetId stored separately — always present for Twitter posts,
-    // used as the reliable unique dedup key instead of sourceUrl (which can be null)
-    tweetId: { type: String },
-
     analysis: {
       sentiment: { type: String },
       keywords: [String],
       engagementScore: { type: Number },
     },
 
+    // ⭐ Simplified Location (name only)
     location: {
       placeId: { type: String },
-      fullName: { type: String },
-      country: { type: String },
-      countryCode: { type: String },
-      placeType: { type: String },
+      fullName: { type: String },     // e.g. "Mumbai, India"
+      country: { type: String },      // e.g. "India"
+      countryCode: { type: String },  // e.g. "IN"
+      placeType: { type: String },    // city / admin / country
     },
 
+    // Sentiment analysis fields
     sentiment: {
       type: String,
       enum: ["positive", "neutral", "negative"],
@@ -81,7 +78,9 @@ const socialPostSchema = new mongoose.Schema(
       max: 1,
     },
 
-    sentimentAnalyzedAt: { type: Date },
+    sentimentAnalyzedAt: {
+      type: Date,
+    },
 
     sentimentSource: {
       type: String,
@@ -106,36 +105,24 @@ const socialPostSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// ✅ Performance indexes
+// ✅ Indexing for performance
 socialPostSchema.index({ brand: 1 });
 socialPostSchema.index({ keyword: 1 });
 socialPostSchema.index({ platform: 1 });
 socialPostSchema.index({ createdAt: -1 });
-socialPostSchema.index({ brand: 1, keyword: 1, platform: 1, createdAt: -1 });
-socialPostSchema.index({ sentimentAnalyzedAt: -1 });
-socialPostSchema.index({ "location.countryCode": 1 });
-socialPostSchema.index({ "location.placeType": 1 });
 
-// ✅ FIX: Two separate dedup indexes:
-//
-// 1. sourceUrl index — uses partialFilterExpression so null/undefined sourceUrls
-//    are completely ignored by the index (sparse:true still indexes null, causing E11000).
-//    NOTE: You MUST manually drop the old index first (see fixIndexes.js).
+socialPostSchema.index({ brand: 1, keyword: 1, platform: 1, createdAt: -1 });
+
+// Prevent duplicate posts
 socialPostSchema.index(
   { sourceUrl: 1, platform: 1 },
-  {
-    unique: true,
-    partialFilterExpression: { sourceUrl: { $type: "string" } },
-  }
+  { unique: true, sparse: true }
 );
 
-// 2. tweetId index — catches Twitter duplicates even when sourceUrl is null
-socialPostSchema.index(
-  { tweetId: 1, platform: 1 },
-  {
-    unique: true,
-    sparse: true, // safe here — tweetId is never null when present, just absent for non-Twitter
-  }
-);
+socialPostSchema.index({ sentimentAnalyzedAt: -1 });
+
+// Location indexes (for filtering by country/place)
+socialPostSchema.index({ "location.countryCode": 1 });
+socialPostSchema.index({ "location.placeType": 1 });
 
 export const SocialPost = mongoose.model("SocialPost", socialPostSchema);

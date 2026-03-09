@@ -712,6 +712,7 @@ export const runKeywordGroupSearch = async (req, res) => {
 
       console.log(`✅ Fetcher found for ${platform}`);
 
+      // Loop keywords
       for (const keyword of group.keywords) {
         console.log(`\n  🔑 Keyword: "${keyword}" on ${platform}`);
 
@@ -747,6 +748,7 @@ export const runKeywordGroupSearch = async (req, res) => {
 
         if (fetchedData.length > 0) {
           const docs = fetchedData.map((item) => {
+            // ✅ Base fields common to all platforms
             const doc = {
               brand: brand._id,
               keyword,
@@ -757,45 +759,19 @@ export const runKeywordGroupSearch = async (req, res) => {
               fetchedAt: new Date(),
             };
 
-            // ✅ FIX: sourceUrl — only set if it's a real non-empty string.
-            // null/undefined both become absent so the unique index never collides.
-            const rawUrl = item.sourceUrl;
-            doc.sourceUrl = (rawUrl && typeof rawUrl === "string" && rawUrl !== "null" && rawUrl !== "undefined")
-              ? rawUrl
-              : undefined;
+            // ✅ All platforms — fetcher already returns schema-shaped fields
+            doc.sourceUrl = item.sourceUrl || item.tweetUrl || undefined;
+            doc.author = item.author || {};
+            doc.content = item.content || {};
 
-            // ✅ FIX: tweetId — stored separately as a reliable Twitter dedup key.
-            // Even if sourceUrl is somehow null, tweetId ensures no duplicates.
-            if (item.tweetId) {
-              doc.tweetId = item.tweetId;
-            }
-
-            doc.author = item.author || {
-              id: item.authorId || null,
-              name: item.authorName || null,
-              username: item.authorUsername || null,
-              profileImage: item.authorProfileImage || null,
-            };
-
-            doc.content = item.content || {
-              text: item.text || null,
-              description: item.description || null,
-              mediaUrl: item.mediaUrl || null,
-            };
-
-            // ✅ FIX: use optional chaining — never falls back to 0 when real data exists
             doc.metrics = {
-              likes: item.metrics?.likes ?? 0,
-              comments: item.metrics?.comments ?? 0,
-              shares: item.metrics?.shares ?? 0,
-              views: item.metrics?.views ?? 0,
+              likes: item.metrics?.likes || 0,
+              comments: item.metrics?.comments || 0,
+              shares: item.metrics?.shares || 0,
+              views: item.metrics?.views || 0,
             };
 
             doc.location = item.location || null;
-
-            // ✅ FIX: guard against literal string "undefined" or Twitter's "und" lang code
-            const lang = item.language;
-            doc.language = (lang && lang !== "undefined" && lang !== "und") ? lang : null;
 
             return doc;
           });
@@ -829,15 +805,16 @@ export const runKeywordGroupSearch = async (req, res) => {
     let duplicateCount = 0;
 
     if (analyzedPosts.length > 0) {
-      console.log("📝 Sample analyzed post:", JSON.stringify(analyzedPosts[0], null, 2));
+      console.log("📝 Sample analyzed post:", JSON.stringify(analyzedPosts[0], null, 2)); // ADD
       try {
         const result = await SocialPost.insertMany(analyzedPosts, {
           ordered: false,
           rawResult: true,
         });
-        console.log("✅ insertMany result:", JSON.stringify(result, null, 2));
+        console.log("✅ insertMany result:", JSON.stringify(result, null, 2)); // ADD
         savedCount = result.insertedCount || analyzedPosts.length;
       } catch (saveError) {
+        console.error("❌ FULL SAVE ERROR:", JSON.stringify(saveError, null, 2)); // ADD
         if (saveError.code === 11000 || saveError.name === "MongoBulkWriteError") {
           if (saveError.result && saveError.result.nInserted) {
             savedCount = saveError.result.nInserted;
