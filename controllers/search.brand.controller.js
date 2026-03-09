@@ -759,9 +759,13 @@ export const runKeywordGroupSearch = async (req, res) => {
               fetchedAt: new Date(),
             };
 
-            // ✅ FIX: removed item.tweetUrl fallback — fetcher now returns item.sourceUrl directly.
-            // item.tweetUrl no longer exists, causing null which breaks the unique index.
-            doc.sourceUrl = item.sourceUrl || undefined;
+            // ✅ FIX: explicitly coerce null → undefined so sparse index ignores it.
+            // Mongoose stores undefined as absent (index skips it), but stores null as a value
+            // causing E11000 collisions across multiple tweets with no sourceUrl.
+            const rawSourceUrl = item.sourceUrl;
+            doc.sourceUrl = (rawSourceUrl && rawSourceUrl !== "null" && rawSourceUrl !== "undefined")
+              ? rawSourceUrl
+              : undefined;
 
             doc.author = item.author || {
               id: item.authorId || null,

@@ -117,10 +117,17 @@ socialPostSchema.index({ platform: 1 });
 socialPostSchema.index({ createdAt: -1 });
 socialPostSchema.index({ brand: 1, keyword: 1, platform: 1, createdAt: -1 });
 
-// Prevent duplicate posts
+// ✅ FIX: replaced sparse:true with partialFilterExpression.
+// sparse:true skips undefined but still indexes null values, causing E11000
+// collisions when multiple posts have no sourceUrl.
+// partialFilterExpression: { sourceUrl: { $type: "string" } } only indexes
+// documents where sourceUrl is an actual string — null and undefined are ignored.
 socialPostSchema.index(
   { sourceUrl: 1, platform: 1 },
-  { unique: true, sparse: true }
+  {
+    unique: true,
+    partialFilterExpression: { sourceUrl: { $type: "string" } },
+  }
 );
 
 socialPostSchema.index({ sentimentAnalyzedAt: -1 });

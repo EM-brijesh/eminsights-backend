@@ -63,7 +63,9 @@ export const getTwitterSearchResults = async ({
       return {
         createdAt: tweet.created_at,
         language: tweet.lang || null,
-        sourceUrl: `https://twitter.com/i/web/status/${tweet.id}`,
+        // ✅ FIX: guard against tweet.id being undefined — template literal would
+        // produce "https://twitter.com/i/web/status/undefined" which is worse than null
+        sourceUrl: tweet.id ? `https://twitter.com/i/web/status/${tweet.id}` : undefined,
 
         // ✅ Nested author object — matches schema & controller expectations
         author: {
