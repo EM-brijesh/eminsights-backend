@@ -29,14 +29,11 @@ const socialPostSchema = new mongoose.Schema(
 
     createdAt: { type: Date, required: true },
 
-    // ✅ FIX #2: Added username and profileImage fields.
-    // Previously Mongoose silently dropped these because they
-    // weren't defined in the schema, even when the data was correct.
     author: {
       id: { type: String },
       name: { type: String },
-      username: { type: String },       // ✅ ADDED
-      profileImage: { type: String },   // ✅ ADDED
+      username: { type: String },
+      profileImage: { type: String },
     },
 
     content: {
@@ -53,6 +50,10 @@ const socialPostSchema = new mongoose.Schema(
     },
 
     sourceUrl: { type: String },
+
+    // ✅ FIX: tweetId stored separately — always present for Twitter posts,
+    // used as the reliable unique dedup key instead of sourceUrl (which can be null)
+    tweetId: { type: String },
 
     analysis: {
       sentiment: { type: String },
@@ -80,9 +81,7 @@ const socialPostSchema = new mongoose.Schema(
       max: 1,
     },
 
-    sentimentAnalyzedAt: {
-      type: Date,
-    },
+    sentimentAnalyzedAt: { type: Date },
 
     sentimentSource: {
       type: String,
@@ -97,9 +96,6 @@ const socialPostSchema = new mongoose.Schema(
       index: true,
     },
 
-    // ✅ FIX #3: language was being fetched (tweet.lang) but never saved
-    // because the schema field existed but doc.language was never assigned
-    // in the controller. Schema was fine — controller mapping was the gap.
     language: {
       type: String,
       index: true,
@@ -110,18 +106,21 @@ const socialPostSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// ✅ Indexes for performance
+// ✅ Performance indexes
 socialPostSchema.index({ brand: 1 });
 socialPostSchema.index({ keyword: 1 });
 socialPostSchema.index({ platform: 1 });
 socialPostSchema.index({ createdAt: -1 });
 socialPostSchema.index({ brand: 1, keyword: 1, platform: 1, createdAt: -1 });
+socialPostSchema.index({ sentimentAnalyzedAt: -1 });
+socialPostSchema.index({ "location.countryCode": 1 });
+socialPostSchema.index({ "location.placeType": 1 });
 
-// ✅ FIX: replaced sparse:true with partialFilterExpression.
-// sparse:true skips undefined but still indexes null values, causing E11000
-// collisions when multiple posts have no sourceUrl.
-// partialFilterExpression: { sourceUrl: { $type: "string" } } only indexes
-// documents where sourceUrl is an actual string — null and undefined are ignored.
+// ✅ FIX: Two separate dedup indexes:
+//
+// 1. sourceUrl index — uses partialFilterExpression so null/undefined sourceUrls
+//    are completely ignored by the index (sparse:true still indexes null, causing E11000).
+//    NOTE: You MUST manually drop the old index first (see fixIndexes.js).
 socialPostSchema.index(
   { sourceUrl: 1, platform: 1 },
   {
@@ -130,10 +129,13 @@ socialPostSchema.index(
   }
 );
 
-socialPostSchema.index({ sentimentAnalyzedAt: -1 });
-
-// Location indexes
-socialPostSchema.index({ "location.countryCode": 1 });
-socialPostSchema.index({ "location.placeType": 1 });
+// 2. tweetId index — catches Twitter duplicates even when sourceUrl is null
+socialPostSchema.index(
+  { tweetId: 1, platform: 1 },
+  {
+    unique: true,
+    sparse: true, // safe here — tweetId is never null when present, just absent for non-Twitter
+  }
+);
 
 export const SocialPost = mongoose.model("SocialPost", socialPostSchema);

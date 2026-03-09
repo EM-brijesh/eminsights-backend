@@ -712,7 +712,6 @@ export const runKeywordGroupSearch = async (req, res) => {
 
       console.log(`✅ Fetcher found for ${platform}`);
 
-      // Loop keywords
       for (const keyword of group.keywords) {
         console.log(`\n  🔑 Keyword: "${keyword}" on ${platform}`);
 
@@ -748,7 +747,6 @@ export const runKeywordGroupSearch = async (req, res) => {
 
         if (fetchedData.length > 0) {
           const docs = fetchedData.map((item) => {
-            // ✅ Base fields common to all platforms
             const doc = {
               brand: brand._id,
               keyword,
@@ -759,13 +757,18 @@ export const runKeywordGroupSearch = async (req, res) => {
               fetchedAt: new Date(),
             };
 
-            // ✅ FIX: explicitly coerce null → undefined so sparse index ignores it.
-            // Mongoose stores undefined as absent (index skips it), but stores null as a value
-            // causing E11000 collisions across multiple tweets with no sourceUrl.
-            const rawSourceUrl = item.sourceUrl;
-            doc.sourceUrl = (rawSourceUrl && rawSourceUrl !== "null" && rawSourceUrl !== "undefined")
-              ? rawSourceUrl
+            // ✅ FIX: sourceUrl — only set if it's a real non-empty string.
+            // null/undefined both become absent so the unique index never collides.
+            const rawUrl = item.sourceUrl;
+            doc.sourceUrl = (rawUrl && typeof rawUrl === "string" && rawUrl !== "null" && rawUrl !== "undefined")
+              ? rawUrl
               : undefined;
+
+            // ✅ FIX: tweetId — stored separately as a reliable Twitter dedup key.
+            // Even if sourceUrl is somehow null, tweetId ensures no duplicates.
+            if (item.tweetId) {
+              doc.tweetId = item.tweetId;
+            }
 
             doc.author = item.author || {
               id: item.authorId || null,
@@ -780,8 +783,7 @@ export const runKeywordGroupSearch = async (req, res) => {
               mediaUrl: item.mediaUrl || null,
             };
 
-            // ✅ FIX: use optional chaining directly so metrics are never 0
-            // when item.metrics exists but the || fallback short-circuits it
+            // ✅ FIX: use optional chaining — never falls back to 0 when real data exists
             doc.metrics = {
               likes: item.metrics?.likes ?? 0,
               comments: item.metrics?.comments ?? 0,
@@ -791,10 +793,9 @@ export const runKeywordGroupSearch = async (req, res) => {
 
             doc.location = item.location || null;
 
-            // ✅ FIX: guard against literal string "undefined" being saved
-            doc.language = (item.language && item.language !== "undefined")
-              ? item.language
-              : null;
+            // ✅ FIX: guard against literal string "undefined" or Twitter's "und" lang code
+            const lang = item.language;
+            doc.language = (lang && lang !== "undefined" && lang !== "und") ? lang : null;
 
             return doc;
           });
@@ -837,7 +838,6 @@ export const runKeywordGroupSearch = async (req, res) => {
         console.log("✅ insertMany result:", JSON.stringify(result, null, 2));
         savedCount = result.insertedCount || analyzedPosts.length;
       } catch (saveError) {
-        console.error("❌ FULL SAVE ERROR:", JSON.stringify(saveError, null, 2));
         if (saveError.code === 11000 || saveError.name === "MongoBulkWriteError") {
           if (saveError.result && saveError.result.nInserted) {
             savedCount = saveError.result.nInserted;

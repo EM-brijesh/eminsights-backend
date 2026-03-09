@@ -37,7 +37,7 @@ export const getTwitterSearchResults = async ({
 
     if (!data?.data) return [];
 
-    // ✅ Build users lookup map
+    // Build users lookup map
     const usersMap = {};
     if (data.includes?.users) {
       data.includes.users.forEach((u) => {
@@ -45,7 +45,7 @@ export const getTwitterSearchResults = async ({
       });
     }
 
-    // ✅ Build places lookup map
+    // Build places lookup map
     const placesMap = {};
     if (data.includes?.places) {
       data.includes.places.forEach((p) => {
@@ -53,21 +53,22 @@ export const getTwitterSearchResults = async ({
       });
     }
 
-    // ✅ FIX #1: Return nested objects that match schema shape.
-    // Previously returned flat fields (authorName, likeCount, etc.)
-    // causing the controller to silently save nulls/empty objects.
     return data.data.map((tweet) => {
       const user = usersMap[tweet.author_id] || {};
       const place = tweet.geo?.place_id ? placesMap[tweet.geo.place_id] : null;
 
       return {
-        createdAt: tweet.created_at,
-        language: tweet.lang || null,
-        // ✅ FIX: guard against tweet.id being undefined — template literal would
-        // produce "https://twitter.com/i/web/status/undefined" which is worse than null
+        // ✅ tweetId always set — used as reliable dedup key in the DB index
+        tweetId: tweet.id,
+
+        // ✅ sourceUrl built from tweet.id — will be undefined if tweet.id missing (extremely rare)
         sourceUrl: tweet.id ? `https://twitter.com/i/web/status/${tweet.id}` : undefined,
 
-        // ✅ Nested author object — matches schema & controller expectations
+        createdAt: tweet.created_at,
+
+        // ✅ Guard against "undefined" string — only save real lang codes
+        language: (tweet.lang && tweet.lang !== "und") ? tweet.lang : null,
+
         author: {
           id: tweet.author_id || null,
           name: user.name || null,
@@ -75,12 +76,10 @@ export const getTwitterSearchResults = async ({
           profileImage: user.profile_image_url || null,
         },
 
-        // ✅ Nested content object
         content: {
           text: tweet.text || null,
         },
 
-        // ✅ Nested metrics using Twitter's actual field names
         metrics: {
           likes: tweet.public_metrics?.like_count || 0,
           comments: tweet.public_metrics?.reply_count || 0,
@@ -88,10 +87,7 @@ export const getTwitterSearchResults = async ({
           views: tweet.public_metrics?.impression_count || 0,
         },
 
-        // ✅ FIX #1 (core location bug):
-        // Prefers geo place data (tweet-level), falls back to user.location
-        // string (e.g. "Detroit, MI"). Previously the fallback was lost
-        // because the controller did item.location || null with no fallback.
+        // ✅ Prefer geo place (tweet-level), fall back to user.location string
         location: place
           ? {
               placeId: place.id,
