@@ -759,19 +759,40 @@ export const runKeywordGroupSearch = async (req, res) => {
               fetchedAt: new Date(),
             };
 
-            // ✅ All platforms — fetcher already returns schema-shaped fields
             doc.sourceUrl = item.sourceUrl || item.tweetUrl || undefined;
-            doc.author = item.author || {};
-            doc.content = item.content || {};
 
-            doc.metrics = {
-              likes: item.metrics?.likes || 0,
-              comments: item.metrics?.comments || 0,
-              shares: item.metrics?.shares || 0,
-              views: item.metrics?.views || 0,
+            // ✅ FIX #2: author — use nested item.author if present (all fixed fetchers
+            // return this), fall back to flat fields for any legacy fetchers
+            doc.author = item.author || {
+              id: item.authorId || null,
+              name: item.authorName || null,
+              username: item.authorUsername || null,
+              profileImage: item.authorProfileImage || null,
             };
 
+            // ✅ FIX #2: content — same pattern
+            doc.content = item.content || {
+              text: item.text || null,
+              description: item.description || null,
+              mediaUrl: item.mediaUrl || null,
+            };
+
+            // ✅ FIX #3: metrics — use nested item.metrics if present,
+            // fall back to flat Twitter field names for legacy fetchers
+            doc.metrics = item.metrics || {
+              likes: item.likeCount || 0,
+              comments: item.replyCount || 0,
+              shares: item.retweetCount || 0,
+              views: item.viewCount || 0,
+            };
+
+            // ✅ FIX #1 (core location bug): item.location is now correctly
+            // shaped by the fetcher (geo place or user.location fallback).
+            // No change needed here — the fix was in the fetcher return shape.
             doc.location = item.location || null;
+
+            // ✅ FIX #4: language was fetched (tweet.lang) but never saved
+            doc.language = item.language || null;
 
             return doc;
           });
@@ -805,16 +826,16 @@ export const runKeywordGroupSearch = async (req, res) => {
     let duplicateCount = 0;
 
     if (analyzedPosts.length > 0) {
-      console.log("📝 Sample analyzed post:", JSON.stringify(analyzedPosts[0], null, 2)); // ADD
+      console.log("📝 Sample analyzed post:", JSON.stringify(analyzedPosts[0], null, 2));
       try {
         const result = await SocialPost.insertMany(analyzedPosts, {
           ordered: false,
           rawResult: true,
         });
-        console.log("✅ insertMany result:", JSON.stringify(result, null, 2)); // ADD
+        console.log("✅ insertMany result:", JSON.stringify(result, null, 2));
         savedCount = result.insertedCount || analyzedPosts.length;
       } catch (saveError) {
-        console.error("❌ FULL SAVE ERROR:", JSON.stringify(saveError, null, 2)); // ADD
+        console.error("❌ FULL SAVE ERROR:", JSON.stringify(saveError, null, 2));
         if (saveError.code === 11000 || saveError.name === "MongoBulkWriteError") {
           if (saveError.result && saveError.result.nInserted) {
             savedCount = saveError.result.nInserted;

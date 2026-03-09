@@ -1,4 +1,3 @@
-// models/data.js
 import mongoose from "mongoose";
 
 const socialPostSchema = new mongoose.Schema(
@@ -30,9 +29,14 @@ const socialPostSchema = new mongoose.Schema(
 
     createdAt: { type: Date, required: true },
 
+    // ✅ FIX #2: Added username and profileImage fields.
+    // Previously Mongoose silently dropped these because they
+    // weren't defined in the schema, even when the data was correct.
     author: {
       id: { type: String },
       name: { type: String },
+      username: { type: String },       // ✅ ADDED
+      profileImage: { type: String },   // ✅ ADDED
     },
 
     content: {
@@ -56,16 +60,14 @@ const socialPostSchema = new mongoose.Schema(
       engagementScore: { type: Number },
     },
 
-    // ⭐ Simplified Location (name only)
     location: {
       placeId: { type: String },
-      fullName: { type: String },     // e.g. "Mumbai, India"
-      country: { type: String },      // e.g. "India"
-      countryCode: { type: String },  // e.g. "IN"
-      placeType: { type: String },    // city / admin / country
+      fullName: { type: String },
+      country: { type: String },
+      countryCode: { type: String },
+      placeType: { type: String },
     },
 
-    // Sentiment analysis fields
     sentiment: {
       type: String,
       enum: ["positive", "neutral", "negative"],
@@ -95,6 +97,9 @@ const socialPostSchema = new mongoose.Schema(
       index: true,
     },
 
+    // ✅ FIX #3: language was being fetched (tweet.lang) but never saved
+    // because the schema field existed but doc.language was never assigned
+    // in the controller. Schema was fine — controller mapping was the gap.
     language: {
       type: String,
       index: true,
@@ -105,12 +110,11 @@ const socialPostSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// ✅ Indexing for performance
+// ✅ Indexes for performance
 socialPostSchema.index({ brand: 1 });
 socialPostSchema.index({ keyword: 1 });
 socialPostSchema.index({ platform: 1 });
 socialPostSchema.index({ createdAt: -1 });
-
 socialPostSchema.index({ brand: 1, keyword: 1, platform: 1, createdAt: -1 });
 
 // Prevent duplicate posts
@@ -121,7 +125,7 @@ socialPostSchema.index(
 
 socialPostSchema.index({ sentimentAnalyzedAt: -1 });
 
-// Location indexes (for filtering by country/place)
+// Location indexes
 socialPostSchema.index({ "location.countryCode": 1 });
 socialPostSchema.index({ "location.placeType": 1 });
 
