@@ -759,10 +759,10 @@ export const runKeywordGroupSearch = async (req, res) => {
               fetchedAt: new Date(),
             };
 
-            doc.sourceUrl = item.sourceUrl || item.tweetUrl || undefined;
+            // ✅ FIX: removed item.tweetUrl fallback — fetcher now returns item.sourceUrl directly.
+            // item.tweetUrl no longer exists, causing null which breaks the unique index.
+            doc.sourceUrl = item.sourceUrl || undefined;
 
-            // ✅ FIX #2: author — use nested item.author if present (all fixed fetchers
-            // return this), fall back to flat fields for any legacy fetchers
             doc.author = item.author || {
               id: item.authorId || null,
               name: item.authorName || null,
@@ -770,29 +770,27 @@ export const runKeywordGroupSearch = async (req, res) => {
               profileImage: item.authorProfileImage || null,
             };
 
-            // ✅ FIX #2: content — same pattern
             doc.content = item.content || {
               text: item.text || null,
               description: item.description || null,
               mediaUrl: item.mediaUrl || null,
             };
 
-            // ✅ FIX #3: metrics — use nested item.metrics if present,
-            // fall back to flat Twitter field names for legacy fetchers
-            doc.metrics = item.metrics || {
-              likes: item.likeCount || 0,
-              comments: item.replyCount || 0,
-              shares: item.retweetCount || 0,
-              views: item.viewCount || 0,
+            // ✅ FIX: use optional chaining directly so metrics are never 0
+            // when item.metrics exists but the || fallback short-circuits it
+            doc.metrics = {
+              likes: item.metrics?.likes ?? 0,
+              comments: item.metrics?.comments ?? 0,
+              shares: item.metrics?.shares ?? 0,
+              views: item.metrics?.views ?? 0,
             };
 
-            // ✅ FIX #1 (core location bug): item.location is now correctly
-            // shaped by the fetcher (geo place or user.location fallback).
-            // No change needed here — the fix was in the fetcher return shape.
             doc.location = item.location || null;
 
-            // ✅ FIX #4: language was fetched (tweet.lang) but never saved
-            doc.language = item.language || null;
+            // ✅ FIX: guard against literal string "undefined" being saved
+            doc.language = (item.language && item.language !== "undefined")
+              ? item.language
+              : null;
 
             return doc;
           });
