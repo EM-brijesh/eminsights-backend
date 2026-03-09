@@ -20,7 +20,7 @@ export const getTwitterSearchResults = async ({
     max_results: Math.min(Math.max(maxResults, 10), 100),
     "tweet.fields": "created_at,public_metrics,author_id,text,geo",
     expansions: "author_id,geo.place_id",
-    "user.fields": "name,username,profile_image_url",
+    "user.fields": "name,username,profile_image_url,location", // ⭐ FIX
     "place.fields": "full_name,country,country_code,place_type,geo",
   };
 
@@ -72,6 +72,7 @@ export const getTwitterSearchResults = async ({
         likeCount: tweet.public_metrics?.like_count,
         quoteCount: tweet.public_metrics?.quote_count,
         tweetUrl: `https://twitter.com/i/web/status/${tweet.id}`,
+
         location: place
           ? {
               placeId: place.id,
@@ -79,7 +80,11 @@ export const getTwitterSearchResults = async ({
               country: place.country,
               countryCode: place.country_code,
               placeType: place.place_type,
-              coordinates: place.geo?.geometry?.coordinates || null, // [longitude, latitude]
+              coordinates: place.geo?.geometry?.coordinates || null,
+            }
+          : user.location
+          ? {
+              name: user.location, // ⭐ fallback from user profile
             }
           : null,
       };
