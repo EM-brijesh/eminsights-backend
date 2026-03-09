@@ -10,7 +10,6 @@ export const getTwitterSearchResults = async ({
 }) => {
   const baseUrl = "https://api.twitter.com/2/tweets/search/recent";
 
-  // Build query
   let query = keyword;
   if (includeKeywords.length) query += " " + includeKeywords.join(" ");
   if (excludeKeywords.length) query += " " + excludeKeywords.map((k) => `-${k}`).join(" ");
@@ -18,10 +17,10 @@ export const getTwitterSearchResults = async ({
   const params = {
     query,
     max_results: Math.min(Math.max(maxResults, 10), 100),
-    "tweet.fields": "created_at,public_metrics,author_id,text,geo",
+    "tweet.fields": "created_at,public_metrics,author_id,text,geo,lang",
     expansions: "author_id,geo.place_id",
     "user.fields": "name,username,profile_image_url,location",
-    "place.fields": "full_name,country,country_code,place_type,geo",
+    "place.fields": "full_name,country,country_code,place_type",
   };
 
   if (startDate) params.start_time = new Date(startDate).toISOString();
@@ -38,7 +37,6 @@ export const getTwitterSearchResults = async ({
 
     if (!data?.data) return [];
 
-    // Map users
     const usersMap = {};
     if (data.includes?.users) {
       data.includes.users.forEach((u) => {
@@ -46,7 +44,6 @@ export const getTwitterSearchResults = async ({
       });
     }
 
-    // Map places
     const placesMap = {};
     if (data.includes?.places) {
       data.includes.places.forEach((p) => {
@@ -59,26 +56,23 @@ export const getTwitterSearchResults = async ({
       const place = tweet.geo?.place_id ? placesMap[tweet.geo.place_id] : null;
 
       return {
-        sourceUrl: `https://twitter.com/i/web/status/${tweet.id}`,
-
-        author: {
-          id: tweet.author_id,
-          name: user.name || user.username || "",
-        },
-
-        content: {
-          text: tweet.text,
-        },
-
-        metrics: {
-          likes: tweet.public_metrics?.like_count || 0,
-          comments: tweet.public_metrics?.reply_count || 0,
-          shares: tweet.public_metrics?.retweet_count || 0,
-          views: tweet.public_metrics?.impression_count || 0,
-        },
-
+        tweetId: tweet.id,
+        text: tweet.text,
+        authorId: tweet.author_id,
+        authorName: user.name || "",
+        authorUsername: user.username || "",
+        authorProfileImage: user.profile_image_url || "",
         createdAt: tweet.created_at,
+        language: tweet.lang || null,
 
+        retweetCount: tweet.public_metrics?.retweet_count || 0,
+        replyCount: tweet.public_metrics?.reply_count || 0,
+        likeCount: tweet.public_metrics?.like_count || 0,
+        quoteCount: tweet.public_metrics?.quote_count || 0,
+
+        tweetUrl: `https://twitter.com/i/web/status/${tweet.id}`,
+
+        // ⭐ Simplified location (matches your schema)
         location: place
           ? {
               placeId: place.id,
@@ -86,12 +80,6 @@ export const getTwitterSearchResults = async ({
               country: place.country,
               countryCode: place.country_code,
               placeType: place.place_type,
-              coordinates: place.geo?.geometry?.coordinates
-                ? {
-                    type: "Point",
-                    coordinates: place.geo.geometry.coordinates,
-                  }
-                : null,
             }
           : user.location
           ? {

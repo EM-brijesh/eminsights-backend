@@ -56,24 +56,13 @@ const socialPostSchema = new mongoose.Schema(
       engagementScore: { type: Number },
     },
 
-    // ⭐ Location data (currently populated for Twitter only)
+    // ⭐ Simplified Location (name only)
     location: {
       placeId: { type: String },
-      fullName: { type: String }, // e.g. "Lakewood, CO"
-      country: { type: String }, // e.g. "United States"
-      countryCode: { type: String, index: true }, // e.g. "US"
-      placeType: { type: String }, // e.g. "city", "country", "admin"
-
-      // GeoJSON format for proper geospatial queries
-      coordinates: {
-        type: {
-          type: String,
-          enum: ["Point"],
-        },
-        coordinates: {
-          type: [Number], // [longitude, latitude]
-        },
-      },
+      fullName: { type: String },     // e.g. "Mumbai, India"
+      country: { type: String },      // e.g. "India"
+      countryCode: { type: String },  // e.g. "IN"
+      placeType: { type: String },    // city / admin / country
     },
 
     // Sentiment analysis fields
@@ -121,15 +110,19 @@ socialPostSchema.index({ brand: 1 });
 socialPostSchema.index({ keyword: 1 });
 socialPostSchema.index({ platform: 1 });
 socialPostSchema.index({ createdAt: -1 });
+
 socialPostSchema.index({ brand: 1, keyword: 1, platform: 1, createdAt: -1 });
 
-socialPostSchema.index({ sourceUrl: 1, platform: 1 }, { unique: true, sparse: true });
+// Prevent duplicate posts
+socialPostSchema.index(
+  { sourceUrl: 1, platform: 1 },
+  { unique: true, sparse: true }
+);
 
 socialPostSchema.index({ sentimentAnalyzedAt: -1 });
 
-// Location indexes
+// Location indexes (for filtering by country/place)
 socialPostSchema.index({ "location.countryCode": 1 });
 socialPostSchema.index({ "location.placeType": 1 });
-socialPostSchema.index({ "location.coordinates": "2dsphere" });
 
 export const SocialPost = mongoose.model("SocialPost", socialPostSchema);
