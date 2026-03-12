@@ -183,394 +183,6 @@ const analyzePostsBeforeSave = async (posts) => {
   }
 };
 
-// export const runSearchForBrand = async (req, res) => {
-//   try {
-//     const { brandName } = req.body;
-
-//     if (!brandName)
-//       return res.status(400).json({ success: false, message: "brandName is required" });
-
-//     const brand = await Brand.findOne({ brandName });
-//     if (!brand)
-//       return res.status(404).json({ success: false, message: "Brand not found" });
-
-//     const {
-//       keywords,
-//       includeKeywords = [],
-//       excludeKeywords = [],
-//       platforms,
-//       language,
-//       country,
-//     } = brand;
-
-//     if (!keywords.length)
-//       return res.status(400).json({ success: false, message: "No keywords configured for this brand" });
-//     if (!platforms.length)
-//       return res.status(400).json({ success: false, message: "No platforms configured for this brand" });
-
-//     const now = new Date();
-//     const startDate = new Date(now.getTime() - 60 * 60 * 1000); // last 1 hour
-//     const endDate = new Date(now.getTime() - 10 * 1000);
-
-//     const results = {};
-//     const allPostsToInsert = [];
-
-//     // Loop over all platforms
-//     for (const platform of platforms) {
-//       results[platform] = [];
-
-//       for (const keyword of keywords) {
-//         let fetchedData = [];
-
-//         if (platform === "youtube") {
-//           fetchedData = await fetchYouTubeSearch(keyword, {
-//             include: includeKeywords,
-//             exclude: excludeKeywords,
-//             language,
-//             country,
-//             startDate,
-//             endDate,
-//           });
-//         } else if (platform === "twitter") {
-//           fetchedData = await fetchTwitterSearch(keyword, {
-//             include: includeKeywords,
-//             exclude: excludeKeywords,
-//             language,
-//             country,
-//             startDate,
-//             endDate,
-//           });
-//         } else if (platform === "reddit") {
-//           fetchedData = await fetchRedditSearch(keyword, {
-//             include: includeKeywords,
-//             exclude: excludeKeywords,
-//             startDate,
-//             endDate,
-//           });
-//         } else if (platform === "google") {
-//           fetchedData = await fetchGoogleSearch(keyword, {
-//             include: includeKeywords,
-//             exclude: excludeKeywords,
-//           });
-//          } 
-//          //else if (platform === "facebook") {
-//         //   fetchedData = await fetchFacebookPublicPosts(keyword, {
-//         //     include: includeKeywords,
-//         //     exclude: excludeKeywords,
-//         //   });
-//         // }
-//         else if (platform === "instagram") {
-//           fetchedData = await fetchInstagramSearch(keyword, {
-//             include: includeKeywords,
-//             exclude: excludeKeywords,
-//           });
-//         }
-
-//         results[platform].push(...fetchedData);
-
-//         // Prepare posts for analysis and save
-//         if (fetchedData.length) {
-//           const docs = fetchedData.map((item) => ({
-//             ...item,
-//             brand: brand._id,
-//             brandName: brand.brandName,
-//             keyword,
-//             platform,
-//             createdAt: new Date(item.createdAt || item.publishedAt || Date.now()),
-//             fetchedAt: new Date(),
-//           }));
-//           allPostsToInsert.push(...docs);
-//         }
-//       }
-//     }
-
-//     // Analyze ALL posts with sentiment before saving
-//     let analyzedPosts = allPostsToInsert;
-//     let analyzedCount = 0;
-//     let failedCount = 0;
-//     const totalScraped = allPostsToInsert.length;
-
-//     if (allPostsToInsert.length > 0) {
-//       analyzedPosts = await analyzePostsBeforeSave(allPostsToInsert);
-//       // Count how many got sentiment
-//       analyzedCount = analyzedPosts.filter(p => p.sentiment).length;
-//       failedCount = totalScraped - analyzedCount;
-//     }
-
-//     // Save posts with sentiment already included
-//     let savedCount = 0;
-//     if (analyzedPosts.length > 0) {
-//       try {
-//         await SocialPost.insertMany(analyzedPosts, { ordered: false });
-//         savedCount = analyzedPosts.length;
-//       } catch (saveError) {
-//         console.error("Error saving posts:", saveError);
-//         // Try to save posts individually if batch fails
-//         for (const post of analyzedPosts) {
-//           try {
-//             await SocialPost.create(post);
-//             savedCount++;
-//           } catch (err) {
-//             console.error("Failed to save individual post:", err.message);
-//           }
-//         }
-//       }
-//     }
-
-//     res.json({
-//       success: true,
-//       brandName: brand.brandName,
-//       summary: {
-//         youtube: results.youtube?.length || 0,
-//         twitter: results.twitter?.length || 0,
-//         reddit: results.reddit?.length || 0,
-//         google: results.google?.length || 0,
-//         instagram: results.instagram?.length || 0,
-//        // facebook: results.facebook?.length || 0,
-//       },
-//       sentimentAnalysis: {
-//         totalScraped,
-//         analyzed: analyzedCount,
-//         failed: failedCount,
-//       },
-//       saved: savedCount,
-//     });
-//   } catch (err) {
-//     console.error("Brand Search Error:", err);
-//     res.status(500).json({ success: false, message: err.message });
-//   }
-// };
-
-// search.controller.js
-//frequency based api calling
-
-// export const runSearchForGroup = async (req, res) => {
-//   try {
-//     const { brandName, groupId } = req.body;
-
-//     const brand = await Brand.findOne({ brandName });
-//     if (!brand)
-//       return res.status(404).json({ success: false, message: "Brand not found" });
-
-//     const group = brand.keywordGroups.id(groupId);
-//     if (!group)
-//       return res.status(404).json({ success: false, message: "Keyword Group not found" });
-
-//     if (group.status === "paused")
-//       return res.status(400).json({ success: false, message: "Group is paused" });
-
-//     const {
-//       keywords,
-//       includeKeywords,
-//       excludeKeywords,
-//       platforms,
-//       language,
-//       country,
-//     } = group;
-
-//     const now = new Date();
-//     const startDate = new Date(now.getTime() - 60 * 60 * 1000);
-//     const endDate = new Date(now.getTime() - 10 * 1000);
-
-//     const allPosts = [];
-
-//     for (const platform of platforms) {
-//       for (const keyword of keywords) {
-//         let results = [];
-
-//         if (platform === "youtube") {
-//           results = await fetchYouTubeSearch(keyword, {
-//             include: includeKeywords,
-//             exclude: excludeKeywords,
-//             language,
-//             country,
-//             startDate,
-//             endDate,
-//           });
-//         }
-
-//         if (platform === "twitter") {
-//           results = await fetchTwitterSearch(keyword, {
-//             include: includeKeywords,
-//             exclude: excludeKeywords,
-//             startDate,
-//             endDate,
-//           });
-//         }
-
-//         if (platform === "reddit") {
-//           results = await fetchRedditSearch(keyword, {
-//             include: includeKeywords,
-//             exclude: excludeKeywords,
-//             startDate,
-//             endDate,
-//           });
-//         }
-
-//         const docs = results.map((r) => ({
-//           ...r,
-//           brand: brand._id,
-//           groupId: group._id,
-//           platform,
-//           keyword,
-//           createdAt: new Date(r.publishedAt || Date.now()),
-//         }));
-
-//         if (docs.length) {
-//           await SocialPost.insertMany(docs, { ordered: false });
-//           allPosts.push(...docs);
-//         }
-//       }
-//     }
-
-//     // Update group state
-//     group.lastRun = now;
-//     group.nextRun = computeNextRun(group.frequency);
-
-//     await brand.save();
-
-//     res.json({
-//       success: true,
-//       message: `Group executed`,
-//       groupName: group.groupName,
-//       fetched: allPosts.length,
-//     });
-//   } catch (err) {
-//     console.error("Group run error:", err);
-//     res.status(500).json({ success: false, message: err.message });
-//   }
-// };
-
-
-
-
-// export const runSearch = async (req, res) => {
-//   try {
-//     const { brandName } = req.body;
-
-//     if (!brandName) {
-//       return res.status(400).json({ success: false, message: "brandName is required" });
-//     }
-
-//     const brand = await Brand.findOne({ brandName });
-//     if (!brand) {
-//       return res.status(404).json({ success: false, message: "Brand not found" });
-//     }
-
-//     const groupsToExecute = deriveGroupExecutions(brand);
-//     if (groupsToExecute.length === 0) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "No keyword groups or brand-level keywords configured for this brand",
-//       });
-//     }
-
-//     const now = new Date();
-//     const startDate = new Date(now.getTime() - 60 * 60 * 1000);
-//     const endDate = new Date(now.getTime() - 10 * 1000);
-
-//     const summary = SUPPORTED_REALTIME_PLATFORMS.reduce((acc, platform) => ({ ...acc, [platform]: 0 }), {});
-//     const postsToInsert = [];
-
-//     for (const group of groupsToExecute) {
-//       for (const platform of group.platforms) {
-//         const fetcher = REALTIME_PLATFORM_FETCHERS[platform];
-//         if (!fetcher) continue;
-
-//         for (const keyword of group.keywords) {
-//           let fetchedData = [];
-//           try {
-//             fetchedData = await fetcher(keyword, {
-//               include: group.includeKeywords,
-//               exclude: group.excludeKeywords,
-//               language: group.language,
-//               country: group.country,
-//               startDate,
-//               endDate,
-//             });
-//           } catch (fetchErr) {
-//             console.error(`Search Run Error: ${platform} fetch failed`, {
-//               brand: brand.brandName,
-//               group: group.name,
-//               keyword,
-//               error: fetchErr.message,
-//             });
-//             continue;
-//           }
-
-//           summary[platform] += fetchedData.length;
-
-//           if (fetchedData.length > 0) {
-//             const docs = fetchedData.map((item) => ({
-//               ...item,
-//               brand: brand._id,
-//               brandName: brand.brandName,
-//               groupName: group.name,
-//               keyword,
-//               platform,
-//               groupId: group._id,
-//               groupName: group.groupName,
-//               createdAt: new Date(item.createdAt || item.publishedAt || Date.now()),
-//               fetchedAt: new Date(),
-//             }));
-
-//             postsToInsert.push(...docs);
-//           }
-//         }
-//       }
-//     }
-
-//     // Analyze ALL posts with sentiment before saving
-//     let analyzedPosts = postsToInsert;
-//     let analyzedCount = 0;
-//     let failedCount = 0;
-//     const totalScraped = postsToInsert.length;
-
-//     if (postsToInsert.length > 0) {
-//       analyzedPosts = await analyzePostsBeforeSave(postsToInsert);
-//       // Count how many got sentiment
-//       analyzedCount = analyzedPosts.filter(p => p.sentiment).length;
-//       failedCount = totalScraped - analyzedCount;
-//     }
-
-//     // Save posts with sentiment already included
-//     let savedCount = 0;
-//     if (analyzedPosts.length > 0) {
-//       try {
-//         await SocialPost.insertMany(analyzedPosts, { ordered: false });
-//         savedCount = analyzedPosts.length;
-//       } catch (saveError) {
-//         console.error("Error saving posts:", saveError);
-//         // Try to save posts individually if batch fails
-//         for (const post of analyzedPosts) {
-//           try {
-//             await SocialPost.create(post);
-//             savedCount++;
-//           } catch (err) {
-//             console.error("Failed to save individual post:", err.message);
-//           }
-//         }
-//       }
-//     }
-
-//     res.json({
-//       success: true,
-//       brandName: brand.brandName,
-//       groupsExecuted: groupsToExecute.length,
-//       fetched: totalScraped,
-//       summary,
-//       sentimentAnalysis: {
-//         totalScraped,
-//         analyzed: analyzedCount,
-//         failed: failedCount,
-//       },
-//       saved: savedCount,
-//     });
-//   } catch (err) {
-//     console.error("Search Run Error:", err);
-//     res.status(500).json({ success: false, message: err.message });
-//   }
-// };
 
 
 //keyword-toggler
@@ -805,32 +417,45 @@ export const runKeywordGroupSearch = async (req, res) => {
     let duplicateCount = 0;
 
     if (analyzedPosts.length > 0) {
-      console.log("📝 Sample analyzed post:", JSON.stringify(analyzedPosts[0], null, 2)); // ADD
+      console.log("📝 Attempting to save", analyzedPosts.length, "posts...");
+      console.log("📝 sourceUrls:", analyzedPosts.map(p => ({
+        platform: p.platform,
+        sourceUrl: p.sourceUrl
+      })));
+
       try {
         const result = await SocialPost.insertMany(analyzedPosts, {
           ordered: false,
           rawResult: true,
         });
-        console.log("✅ insertMany result:", JSON.stringify(result, null, 2)); // ADD
+
+        console.log("✅ insertMany SUCCESS");
+        console.log("✅ insertedCount:", result.insertedCount);
+        console.log("✅ insertedIds:", JSON.stringify(result.insertedIds, null, 2));
         savedCount = result.insertedCount || analyzedPosts.length;
+
       } catch (saveError) {
-        console.error("❌ FULL SAVE ERROR:", JSON.stringify(saveError, null, 2)); // ADD
+        console.error("❌ SAVE ERROR NAME:", saveError.name);
+        console.error("❌ SAVE ERROR CODE:", saveError.code);
+        console.error("❌ nInserted:", saveError.result?.nInserted ?? "undefined");
+        console.error("❌ writeErrors count:", saveError.writeErrors?.length ?? 0);
+        console.error("❌ writeErrors detail:", JSON.stringify(
+          saveError.writeErrors?.slice(0, 3).map(e => ({
+            code: e.code,
+            index: e.index,
+            errmsg: e.errmsg,
+            sourceUrl: analyzedPosts[e.index]?.sourceUrl,
+            platform: analyzedPosts[e.index]?.platform,
+          })), null, 2
+        ));
+
         if (saveError.code === 11000 || saveError.name === "MongoBulkWriteError") {
-          if (saveError.result && saveError.result.nInserted) {
-            savedCount = saveError.result.nInserted;
-          } else if (saveError.insertedDocs) {
-            savedCount = saveError.insertedDocs.length;
-          }
-
-          if (saveError.writeErrors) {
-            duplicateCount = saveError.writeErrors.filter(
-              (err) => err.code === 11000
-            ).length;
-          }
-
-          console.log(`✅ Saved ${savedCount} posts, skipped ${duplicateCount} duplicates`);
+          savedCount = saveError.result?.nInserted ?? 0;
+          duplicateCount = saveError.writeErrors?.filter(e => e.code === 11000).length ?? 0;
+          console.log(`⚠️ Duplicate run result: saved=${savedCount}, duplicates=${duplicateCount}`);
         } else {
-          console.error("❌ Error saving posts:", saveError);
+          console.error("❌ NON-DUPLICATE ERROR:", saveError.message);
+          console.error("❌ FULL STACK:", saveError.stack);
         }
       }
     }
