@@ -143,7 +143,7 @@ export const fetchInstagramHashtagPosts = async ({
 
     console.log("    ✅ Hashtag ID:", hashtagId);
 
-    const fields = "id,caption,permalink,timestamp,username";
+    const fields = "id,caption,permalink,timestamp,media_type";
     const allPosts = [];
     const seenIds = new Set();
 
