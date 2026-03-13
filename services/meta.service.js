@@ -152,6 +152,9 @@ export const fetchInstagramHashtagPosts = async ({
     for (const edge of edges) {
       try {
         console.log(`    ⏳ Fetching ${edge}...`);
+        if (edge === "top_media") {
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 1s delay
+    }
 
         const { data } = await axios.get(`${GRAPH_API}/${hashtagId}/${edge}`, {
           params: {
