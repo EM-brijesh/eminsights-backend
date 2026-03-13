@@ -8,7 +8,7 @@ export const getTwitterSearchResults = async ({
   endDate,
   maxResults = 10,
 }) => {
-  const baseUrl = "https://api.twitter.com/2/tweets/search/recent";
+  const baseUrl = "https://api.twitter.com/2/tweets/search/all";
 
   let query = keyword;
   if (includeKeywords.length) query += " " + includeKeywords.join(" ");
