@@ -6,7 +6,7 @@ export const getYouTubeSearchResults = async ({
   excludeKeywords = [],
   startDate,
   endDate,
-  maxResults = 10,
+  maxResults = 50,
   language = "en",
   country = "IN"
 }) => {

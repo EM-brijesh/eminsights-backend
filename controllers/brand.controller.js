@@ -226,7 +226,7 @@ export const getBrands = async (req, res) => {
   try {
     const brands = await Brand.find({}).lean();
     res.json({ success: true, count: brands.length, brands });
-    console.log("🔥 getBrands fetched:", JSON.stringify(brands, null, 2));
+    // console.log("🔥 getBrands fetched:", JSON.stringify(brands, null, 2));
   } catch (err) {
     console.error("getBrands Error:", err);
     res.status(500).json({ success: false, message: err.message });

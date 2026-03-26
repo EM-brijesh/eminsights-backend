@@ -44,7 +44,7 @@ export const fetchInstagramSearch = async (
       igUserId,
       accessToken,
       hashtag: keyword,
-      limit: Math.min(limit, 10)
+      limit: Math.min(limit, 50)
     });
     
     console.log(`  ✅ Fetched ${posts.length} Instagram posts`);
@@ -54,7 +54,7 @@ export const fetchInstagramSearch = async (
       platform: "instagram",
       createdAt: new Date(p.timestamp),
       author: {
-        name: p.username || "Instagram User"
+        name:  "Instagram User"
       },
       content: {
         text: p.caption || "",

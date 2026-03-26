@@ -24,6 +24,7 @@ const allowedOriginList = process.env.ALLOWED_ORIGINS
     "http://localhost:3000",
     "http://eminsights.in",
     "https://eminsights.in",
+    "https://beta.eminsights.in",
     "https://eminsights-frontend.vercel.app"
   ];
 
