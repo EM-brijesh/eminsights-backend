@@ -5,6 +5,7 @@ import {
   checkSentiment,
   getSentimentSummary,
   updateManualSentiment,
+  updateManualSentimentBulk,
   saveSentiment,
 } from "../controllers/sentiment.controller.js";
 import { protect } from "../middleware/auth.js";
@@ -17,6 +18,7 @@ router.post("/save", protect, saveSentiment);
 router.post("/batch-analyze", protect, batchAnalyzeSentiment);
 router.get("/summary", protect, getSentimentSummary);
 router.patch("/manual", protect, updateManualSentiment);
+router.patch("/manual/bulk", protect, updateManualSentimentBulk);
 
 export default router;
 

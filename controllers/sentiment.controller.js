@@ -438,6 +438,115 @@ export const updateManualSentiment = async (req, res) => {
   }
 };
 
+export const updateManualSentimentBulk = async (req, res) => {
+  try {
+    const { postIds, sentiment } = req.body || {};
+    const allowed = ["positive", "neutral", "negative"];
+
+    if (!Array.isArray(postIds) || postIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "postIds is required and must be a non-empty array",
+      });
+    }
+
+    if (!sentiment || !allowed.includes(String(sentiment).toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: "sentiment must be one of: positive, neutral, negative",
+      });
+    }
+
+    const normalizedSentiment = String(sentiment).toLowerCase();
+
+    const uniqueIds = Array.from(
+      new Set(
+        postIds
+          .map((id) => (id ? String(id) : null))
+          .filter(Boolean),
+      ),
+    );
+
+    if (uniqueIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "postIds must contain valid post identifiers",
+      });
+    }
+
+    const existing = await SocialPost.find({ _id: { $in: uniqueIds } })
+      .select({ sentiment: 1 })
+      .lean();
+
+    const existingById = new Map(
+      existing.map((p) => [String(p._id), p.sentiment]),
+    );
+
+    const notFoundPostIds = uniqueIds.filter((id) => !existingById.has(id));
+
+    // Skip updates for posts whose stored sentiment already matches the requested sentiment.
+    const idsToUpdate = uniqueIds.filter((id) => {
+      const oldSentiment = existingById.get(id);
+      return oldSentiment !== normalizedSentiment;
+    });
+
+    const failedPostIds = [...notFoundPostIds];
+    const updatedPostIds = [];
+
+    for (const postId of idsToUpdate) {
+      try {
+        const oldSentiment = existingById.get(postId) ?? null;
+
+        await applySentimentUpdate(
+          postId,
+          { sentiment: normalizedSentiment },
+          {
+            sentimentSource: "manual",
+            markManual: true,
+          },
+        );
+
+        try {
+          await SentimentChangeLog.create({
+            post: postId,
+            oldSentiment,
+            newSentiment: normalizedSentiment,
+            user: req.user?._id || null,
+            changedAt: new Date(),
+          });
+        } catch (logError) {
+          console.error("Failed to write sentiment change log:", logError.message);
+        }
+
+        updatedPostIds.push(postId);
+      } catch (updateError) {
+        console.error(
+          `Failed to update sentiment for post ${postId}:`,
+          updateError?.message || updateError,
+        );
+        failedPostIds.push(postId);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        updatedPostIds,
+        failedPostIds,
+        updatedCount: updatedPostIds.length,
+        failedCount: failedPostIds.length,
+        requestedCount: uniqueIds.length,
+      },
+    });
+  } catch (error) {
+    console.error("Update manual sentiment bulk error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update sentiment manually",
+    });
+  }
+};
+
 /**
  * POST /api/sentiment/batch-analyze
  * Analyze batches of posts that are missing sentiment data
