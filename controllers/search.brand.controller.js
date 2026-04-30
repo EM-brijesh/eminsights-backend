@@ -9,6 +9,7 @@ import { fetchGoogleSearch } from "../services/google.service.js";
 import { analyzePostsSentiment } from "../services/sentiment.service.js";
 import { fetchInstagramSearch } from "../services/instagramFetcher.js";
 import { fetchFacebookPublicPosts, fetchPostsForPageAndGroup } from "../services/fbpublicpagefetcher.js";
+import { fetchRSSNews } from "../integrations/news-blogs.js";
 
 const REALTIME_PLATFORM_FETCHERS = {
   youtube: fetchYouTubeSearch,
@@ -16,7 +17,8 @@ const REALTIME_PLATFORM_FETCHERS = {
   reddit: fetchRedditSearch,
   google: fetchGoogleSearch,
   instagram: fetchInstagramSearch,
-  facebook: fetchFacebookPublicPosts
+  facebook: fetchFacebookPublicPosts,
+  news: fetchRSSNews,
 };
 
 const SUPPORTED_REALTIME_PLATFORMS = Object.keys(REALTIME_PLATFORM_FETCHERS);

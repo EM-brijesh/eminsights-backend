@@ -7,7 +7,6 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon server.js",
-  
     "start": "node --dns-result-order=ipv4first server.js"
   },
   "author": "",
@@ -32,9 +31,7 @@
     "nodemon": "^3.1.10",
     "react-icons": "^5.5.0",
     "router": "^2.2.0",
-    "routes": "^2.1.0"
-
+    "routes": "^2.1.0",
+    "rss-parser": "^3.13.0"
   }
-
 }
-

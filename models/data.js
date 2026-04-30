@@ -13,7 +13,7 @@ const socialPostSchema = new mongoose.Schema(
 
     platform: {
       type: String,
-      enum: ["twitter", "youtube", "reddit", "google", "facebook", "instagram"],
+      enum: ["twitter", "youtube", "reddit", "google", "facebook", "instagram" , "news"],
       required: true,
     },
 
